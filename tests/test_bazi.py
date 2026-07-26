@@ -117,6 +117,61 @@ class TestBoundaries(unittest.TestCase):
         self.assertLess(delta, 120)
 
 
+class TestChinaDST(unittest.TestCase):
+    """中国 1986–1991 年夏令时。出生证明记的是拨快一小时的墙钟时间，
+    不回退会让约一半的当事人时柱错位。"""
+
+    def test_period_detection(self):
+        from bazi.chart import in_china_dst
+        cases = [
+            ((1990, 6, 15, 9, 0), True),    # 夏令时期间
+            ((1990, 3, 1, 9, 0), False),    # 同年非夏令时
+            ((1992, 6, 15, 9, 0), False),   # 制度已废止
+            ((1986, 5, 4, 3, 0), True),     # 首年起始日 02:00 之后
+            ((1986, 5, 4, 1, 0), False),    # 起始日 02:00 之前
+        ]
+        for parts, expected in cases:
+            got = in_china_dst(datetime(*parts, tzinfo=CST))
+            self.assertEqual(got, expected, "{} 判定错误".format(parts))
+
+    def test_hour_pillar_shifts(self):
+        """记录 10:00 落在巳时，回退一小时后应退回辰时。"""
+        on = build_chart(1990, 6, 15, 10, 0, longitude=116.41)
+        off = build_chart(1990, 6, 15, 10, 0, longitude=116.41,
+                          adjust_china_dst=False)
+        self.assertTrue(on.dst_adjusted)
+        self.assertFalse(off.dst_adjusted)
+        self.assertNotEqual(on.hour.gz, off.hour.gz)
+
+    def test_untouched_outside_period(self):
+        c = build_chart(1995, 6, 15, 10, 0, longitude=116.41)
+        self.assertFalse(c.dst_adjusted)
+
+    def test_only_applies_to_china_timezone(self):
+        """海外时区不该被中国夏令时规则波及。"""
+        c = build_chart(1990, 6, 15, 10, 0, longitude=-118.24, tz_offset=-8)
+        self.assertFalse(c.dst_adjusted)
+
+
+class TestHourBoundary(unittest.TestCase):
+
+    def test_distance_is_symmetric_and_bounded(self):
+        """时辰每两小时一换，距交界最多 60 分钟。"""
+        for hh in range(0, 24):
+            for mm in (0, 17, 30, 59):
+                c = build_chart(2000, 3, 10, hh, mm, longitude=120.0,
+                                use_true_solar_time=False)
+                gap = c.minutes_to_hour_boundary
+                self.assertGreaterEqual(gap, 0)
+                self.assertLessEqual(gap, 60)
+
+    def test_exact_boundary_is_zero(self):
+        # 关掉真太阳时校正，23:00 正是子时起点
+        c = build_chart(2000, 3, 10, 23, 0, longitude=120.0,
+                        use_true_solar_time=False)
+        self.assertEqual(c.minutes_to_hour_boundary, 0)
+
+
 class TestLuckPillars(unittest.TestCase):
 
     def test_direction_yin_male_reverse(self):

@@ -244,7 +244,14 @@
         </select>
       </label>
       <label class="field">
-        <span>出生地</span>
+        <span>出生省份 / 地区</span>
+        <select name="province" id="province-select"></select>
+      </label>
+    </div>
+
+    <div class="field-row">
+      <label class="field">
+        <span>出生城市</span>
         <select name="city" id="city-select"></select>
       </label>
     </div>
@@ -261,9 +268,11 @@
         <span>晚子时归次日（子正换日）
           <em>关闭则按夜半换日，两派皆有所本</em></span>
       </label>
-      <label class="field">
-        <span>自定经度（东经为正）</span>
-        <input type="number" name="longitude" step="0.01" min="-180" max="180" placeholder="留空则用所选城市">
+      <label class="check">
+        <input type="checkbox" name="dst" checked>
+        <span>自动回退夏令时
+          <em>1986–1991 年中国实行过夏令时，出生证明记的是拨快一小时的墙钟时间。
+            若你确认记录的已是标准时，关掉它</em></span>
       </label>
     </details>
 

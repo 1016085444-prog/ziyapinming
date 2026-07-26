@@ -43,6 +43,31 @@ DEFAULT_TZ = 8.0
 DEFAULT_LONGITUDE = 116.4074   # 北京
 DEFAULT_LATITUDE = 39.9042
 
+# 中国 1986–1991 年实行过夏令时，每年四月中旬至九月中旬墙上时钟拨快一小时。
+# 出生证明和户口本记的是当时的墙钟时间，直接拿来排盘会整体偏快 1 小时——
+# 足以让时柱错一位。区间为 [起, 止)，均自当日 02:00 生效。
+CN_DST_PERIODS = [
+    ((1986, 5, 4), (1986, 9, 14)),
+    ((1987, 4, 12), (1987, 9, 13)),
+    ((1988, 4, 10), (1988, 9, 11)),
+    ((1989, 4, 16), (1989, 9, 17)),
+    ((1990, 4, 15), (1990, 9, 16)),
+    ((1991, 4, 14), (1991, 9, 15)),
+]
+
+
+def in_china_dst(dt):
+    """判断某个「墙钟时刻」是否落在中国夏令时期间。
+
+    只对中国时区（UTC+8）有意义，调用方负责判断适用性。
+    """
+    for start, end in CN_DST_PERIODS:
+        lo = datetime(*start, 2, 0, tzinfo=dt.tzinfo)
+        hi = datetime(*end, 2, 0, tzinfo=dt.tzinfo)
+        if lo <= dt < hi:
+            return True
+    return False
+
 
 @lru_cache(maxsize=4096)
 def _term_jd(year, index):
@@ -145,6 +170,18 @@ class Chart:
     prev_node: Tuple[str, datetime] = None   # 上一个节
     next_node: Tuple[str, datetime] = None   # 下一个节
     fetal_origin: str = ""                   # 胎元
+    dst_adjusted: bool = False               # 是否回退过中国夏令时
+
+    @property
+    def minutes_to_hour_boundary(self):
+        """真太阳时距最近的时辰交界还有几分钟。
+
+        时辰每两小时一换，界点在 23:00、01:00、03:00……
+        这个值越小，说明时柱越经不起出生时间或经度的微小误差。
+        """
+        m = self.true_solar_time.hour * 60 + self.true_solar_time.minute
+        pos = (m + 60) % 120          # 距本时辰起点的分钟数
+        return min(pos, 120 - pos)
 
     @property
     def pillars(self):
@@ -188,8 +225,9 @@ class Chart:
                 "真太阳时": self.true_solar_time.strftime("%Y-%m-%d %H:%M"),
                 "性别": "男" if self.gender == "male" else "女",
                 "经度": self.longitude,
-                "纬度": self.latitude,
                 "生肖": self.zodiac,
+                "已回退夏令时": self.dst_adjusted,
+                "距时辰交界": self.minutes_to_hour_boundary,
             },
             "四柱": [p.to_dict(ds) for p in self.pillars],
             "日主": {"天干": ds, "五行": STEM_ELEMENT[ds],
@@ -266,6 +304,7 @@ def build_chart(
     tz_offset=DEFAULT_TZ,
     use_true_solar_time=True,
     late_zi_shifts_day=True,
+    adjust_china_dst=True,
     luck_count=10,
 ):
     """排出完整命盘。
@@ -286,6 +325,13 @@ def build_chart(
 
     tz = timezone(timedelta(hours=tz_offset))
     local_dt = datetime(year, month, day, hour, minute, tzinfo=tz)
+
+    # 夏令时回退：把墙钟时间还原成标准时。必须在一切推算之前完成，
+    # 否则年月日时四柱都可能跟着错。
+    dst_applied = False
+    if adjust_china_dst and abs(tz_offset - 8.0) < 1e-6 and in_china_dst(local_dt):
+        local_dt -= timedelta(hours=1)
+        dst_applied = True
 
     if use_true_solar_time:
         reckon_dt = _apply_true_solar(local_dt, longitude, tz_offset)
@@ -327,6 +373,7 @@ def build_chart(
         latitude=latitude,
         year=year_pillar, month=month_pillar,
         day=day_pillar, hour=hour_pillar,
+        dst_adjusted=dst_applied,
     )
 
     chart.prev_node = (

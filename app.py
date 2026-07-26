@@ -34,11 +34,12 @@ class BirthInput(BaseModel):
     hour: int = Field(..., ge=0, le=23)
     minute: int = Field(0, ge=0, le=59)
     gender: str = Field("male", pattern="^(male|female)$")
+    # 纬度不参与任何推算（真太阳时只用经度），故不作为入参
     longitude: float = Field(116.4074, ge=-180, le=180)
-    latitude: float = Field(39.9042, ge=-90, le=90)
     tz_offset: float = Field(8.0, ge=-12, le=14)
     use_true_solar_time: bool = True
     late_zi_shifts_day: bool = True
+    adjust_china_dst: bool = True
 
 
 @app.post("/api/chart")
@@ -50,10 +51,10 @@ def api_chart(payload: BirthInput):
             payload.hour, payload.minute,
             gender=payload.gender,
             longitude=payload.longitude,
-            latitude=payload.latitude,
             tz_offset=payload.tz_offset,
             use_true_solar_time=payload.use_true_solar_time,
             late_zi_shifts_day=payload.late_zi_shifts_day,
+            adjust_china_dst=payload.adjust_china_dst,
         )
     except ValueError as exc:
         raise HTTPException(400, str(exc))

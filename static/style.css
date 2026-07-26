@@ -577,6 +577,17 @@ input:focus, select:focus {
 }
 .birth-meta b { color: var(--text); font-weight: 500; }
 
+.meta-warn {
+  margin-top: .7rem;
+  padding: .6rem .8rem;
+  font-size: .78rem;
+  line-height: 1.75;
+  color: #E0B48C;
+  background: rgba(208,100,80,.09);
+  border: 1px solid rgba(208,100,80,.28);
+  border-radius: 9px;
+}
+
 .table-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
 
 /* 四柱是全页最该一眼看全的东西，所以窄屏下压字号也不让它横向滚动。 */
