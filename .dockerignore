@@ -1,0 +1,16 @@
+# 虚拟环境有 50MB，进镜像纯属浪费且会拖慢构建
+.venv/
+venv/
+
+__pycache__/
+*.py[cod]
+
+.git/
+.gitignore
+.DS_Store
+.env
+
+# 部署时用不到
+tests/
+README.md
+.claude/

@@ -1,0 +1,914 @@
+/* 子牙品命 — 八字排盘问命
+   移动优先。
+
+   设计取向：高级感来自克制与质感（颗粒、层次、留白、字体），
+   神秘感来自「从暗处浮现」而非堆装饰。所以全站没有渐变紫、没有旋转
+   太极、没有闪光——那些恰恰是廉价感的来源。
+
+   色彩用冷暖对撞造深度：底色偏玄（深蓝黑，传统里北方/水的颜色），
+   强调色用暖金。冷底衬暖光，画面才有纵深。 */
+
+:root {
+  --void:       #07080C;
+  --ink:        #0C0E14;
+  --surface:    #12151D;
+  --surface-2:  #171B25;
+  --line:       #232936;
+  --line-warm:  rgba(205,163,73,.22);
+
+  --text:       #E7E3D9;
+  --muted:      #8B8778;
+  --faint:      #5C5A52;
+
+  --gold:       #CDA349;
+  --gold-lit:   #E8CE8A;
+  --gold-dim:   #8A7238;
+
+  --wood:  #62A87B;
+  --fire:  #D06450;
+  --earth: #C89A5B;
+  --metal: #DCD6C6;
+  --water: #5F97C4;
+
+  --serif: "Songti SC", "STSong", "Noto Serif CJK SC", "Source Han Serif SC",
+           "SimSun", Georgia, serif;
+  --sans: -apple-system, BlinkMacSystemFont, "PingFang SC",
+          "Hiragino Sans GB", "Microsoft YaHei", "Helvetica Neue", sans-serif;
+
+  --radius: 16px;
+  --pad: 1.25rem;
+
+  /* 长尾缓动：起步快、收尾慢，动作显得从容而非弹跳 */
+  --ease: cubic-bezier(.16, .84, .32, 1);
+}
+
+* { box-sizing: border-box; }
+
+/* hidden 属性靠浏览器默认样式表的 display:none 生效，任何作者级
+   display 声明都会顶掉它（.qr 的 display:block 就踩过这个坑）。 */
+[hidden] { display: none !important; }
+
+/* 首屏的太极刻意出血到视口外，不夹住就会多出一条横向滚动。
+   用 clip 而不是 hidden：hidden 会把 body 变成滚动容器，牵连粘性定位等行为。
+   .table-scroll（大运条）是独立的滚动容器，不受影响。 */
+html, body { overflow-x: clip; }
+
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background:
+    radial-gradient(120% 70% at 50% -15%, rgba(205,163,73,.09), transparent 60%),
+    radial-gradient(90% 60% at 50% 110%, rgba(95,151,196,.05), transparent 70%),
+    linear-gradient(180deg, var(--ink) 0%, var(--void) 70%);
+  background-attachment: fixed;
+  color: var(--text);
+  font-family: var(--sans);
+  font-size: 16px;
+  line-height: 1.7;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ── 氛围层 ───────────────────────────────────────────────
+   胶片颗粒。这一条是深色界面从「平」变「贵」的关键：纯色块会显得像
+   未完成的稿子，极淡的噪点给画面质感。 */
+
+body::before {
+  content: "";
+  position: fixed;
+  inset: -50%;
+  pointer-events: none;
+  z-index: 1;
+  opacity: .045;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='240'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='240' height='240' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+/* 暗角：把视线收回中央，边缘沉进暗处 */
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 1;
+  background: radial-gradient(115% 85% at 50% 40%, transparent 45%, rgba(0,0,0,.55) 100%);
+}
+
+/* 地支环：环心刻意抬到视口之上，只让下缘的弧扫过画面——完整露出会变成
+   图标，截取一段弧才是氛围。转一圈五分钟，慢到察觉不到「在动」。 */
+.ring {
+  position: fixed;
+  top: -30vh;
+  left: 50%;
+  width: min(190vw, 1040px);
+  aspect-ratio: 1;
+  transform: translateX(-50%);
+  transform-origin: 50% 50%;
+  pointer-events: none;
+  z-index: 0;
+  /* 首屏有太极当主角，环退到更弱，免得两个圆形母题打架 */
+  opacity: .04;
+  animation: spin 300s linear infinite;
+}
+
+@keyframes spin { to { transform: translateX(-50%) rotate(360deg); } }
+
+main {
+  position: relative;
+  z-index: 2;
+  max-width: 700px;
+  margin: 0 auto;
+  padding: 0 1rem 5rem;
+}
+
+/* ── 页眉 ─────────────────────────────────────────────── */
+
+.masthead {
+  position: relative;
+  z-index: 3;              /* 高于 main，任何幕布都盖不到品牌名 */
+  padding: 2.4rem 1rem 1.6rem;
+  max-width: 700px;
+  margin: 0 auto;
+}
+
+.brand { display: flex; align-items: baseline; gap: .85rem; }
+
+.brand-mark {
+  font-family: var(--serif);
+  font-size: 1.7rem;
+  letter-spacing: .16em;
+  white-space: nowrap;
+  background: linear-gradient(175deg, var(--gold-lit), var(--gold) 55%, var(--gold-dim));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.brand-sub {
+  font-size: .78rem;
+  color: var(--faint);
+  letter-spacing: .12em;
+}
+
+/* ── 首屏 ─────────────────────────────────────────────────
+   构图照搬「人在浩大之中很小」这条：太极占据大半屏并出血到右缘，
+   标题压在它的暗面上。宿命感来自尺度对比，不是特效。 */
+
+.hero {
+  position: relative;
+  padding: 1rem 0 2.2rem;
+  min-height: 70vh;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+/* 想换成生成图（星云、古籍、窗前人影之类）：把 .hero-art 里的 svg
+   换成 <img class="hero-photo" src="...">，并给它同样的绝对定位与
+   遮罩即可，下面的文字层不用动。 */
+.hero-art {
+  position: absolute;
+  top: 46%;
+  right: -32%;
+  width: 108%;
+  aspect-ratio: 1;
+  transform: translateY(-50%);
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* 文字落在太极的亮金面上会糊掉，所以左侧必须压暗。
+
+   用遮罩淡化图形本身，而不是在上面盖一层暗色矩形——盖矩形会在
+   宽屏（main 窄于视口）时露出一道竖直边，而遮罩在任何背景下都不留痕迹。 */
+.hero-art {
+  -webkit-mask-image: linear-gradient(96deg,
+    transparent 8%, rgba(0,0,0,.08) 28%, rgba(0,0,0,.40) 46%,
+    rgba(0,0,0,.82) 62%, #000 76%);
+  mask-image: linear-gradient(96deg,
+    transparent 8%, rgba(0,0,0,.08) 28%, rgba(0,0,0,.40) 46%,
+    rgba(0,0,0,.82) 62%, #000 76%);
+}
+
+/* 星场是正方形，边缘会硬切；单独给它一个圆形遮罩收口 */
+.starfield {
+  -webkit-mask-image: radial-gradient(closest-side, #000 55%, transparent 100%);
+  mask-image: radial-gradient(closest-side, #000 55%, transparent 100%);
+}
+
+.starfield {
+  position: absolute;
+  inset: -18%;
+  width: 136%;
+  height: 136%;
+}
+
+.taiji {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  filter: drop-shadow(0 0 42px rgba(120,170,220,.16));
+}
+
+.taiji-spin {
+  transform-origin: 100px 100px;
+  animation: spin-slow 180s linear infinite;
+}
+@keyframes spin-slow { to { transform: rotate(360deg); } }
+
+.twinkle { animation: blink 5.5s ease-in-out infinite; }
+@keyframes blink { 0%,100% { opacity: .25; } 50% { opacity: .95; } }
+
+.hero-copy { position: relative; z-index: 2; }
+
+.eyebrow {
+  font-size: .72rem;
+  letter-spacing: .34em;
+  color: var(--gold-dim);
+  margin: 0 0 .9rem;
+}
+
+.hero-title {
+  font-family: var(--serif);
+  font-size: clamp(2.7rem, 14vw, 4.4rem);
+  font-weight: 700;
+  line-height: 1.14;
+  letter-spacing: .02em;
+  margin: 0;
+  text-shadow: 0 2px 30px rgba(0,0,0,.75);
+}
+.hero-title span { display: block; }
+
+/* 两色标题：一行金一行白，是参考图最抓眼的一处处理 */
+.t-gold {
+  background: linear-gradient(168deg, var(--gold-lit), var(--gold) 48%, #A9873C);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.t-plain { color: #F2EEE6; }
+
+/* 细金线 + 菱形收口，参考图里反复出现的分隔母题 */
+.rule-diamond {
+  display: flex;
+  align-items: center;
+  gap: .55rem;
+  margin: 1.15rem 0;
+  max-width: 15rem;
+}
+.rule-diamond::before {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(90deg, var(--gold-dim), rgba(205,163,73,.06));
+}
+.rule-diamond i {
+  width: 5px; height: 5px;
+  background: var(--gold);
+  transform: rotate(45deg);
+  flex: none;
+}
+
+.hero-sub {
+  font-size: .93rem;
+  line-height: 2;
+  color: #C9C3B6;
+  margin: 0 0 1.5rem;
+  text-shadow: 0 1px 16px rgba(0,0,0,.7);
+}
+
+.trust {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .45rem;
+  margin-bottom: 1.6rem;
+}
+.trust span {
+  display: inline-flex;
+  align-items: center;
+  gap: .35rem;
+  font-size: .74rem;
+  color: #BFB8A8;
+  padding: .34rem .7rem;
+  border: 1px solid rgba(205,163,73,.28);
+  border-radius: 20px;
+  background: rgba(8,10,16,.55);
+  backdrop-filter: blur(4px);
+}
+.trust b { color: var(--gold); font-weight: 400; }
+
+.hero-cta { display: flex; gap: .6rem; }
+.hero-cta .btn-primary { flex: 1.15; letter-spacing: .22em; text-indent: .22em; }
+
+.btn-outline {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(205,163,73,.4);
+  border-radius: 11px;
+  color: var(--gold-lit);
+  text-decoration: none;
+  font-family: var(--serif);
+  font-size: .98rem;
+  letter-spacing: .18em;
+  text-indent: .18em;
+  min-height: 50px;
+  background: rgba(8,10,16,.5);
+  backdrop-filter: blur(4px);
+  transition: background .25s, border-color .25s;
+}
+.btn-outline:active { background: rgba(205,163,73,.12); }
+
+/* ── 体系 ─────────────────────────────────────────────── */
+
+.method-list {
+  list-style: none;
+  margin: 0 0 .4rem;
+  padding: 0;
+  counter-reset: m;
+}
+.method-list li {
+  padding: 1rem 0;
+  border-top: 1px solid var(--line);
+}
+.method-list li:first-child { border-top: none; padding-top: .2rem; }
+
+.m-head {
+  display: flex;
+  align-items: baseline;
+  gap: .6rem;
+  margin-bottom: .45rem;
+}
+.m-no {
+  font-family: var(--serif);
+  font-size: 1.15rem;
+  color: var(--gold);
+  flex: none;
+}
+.m-head b { font-size: .97rem; font-weight: 600; letter-spacing: .04em; }
+
+.method-list p {
+  margin: 0;
+  font-size: .86rem;
+  line-height: 1.95;
+  color: var(--muted);
+  padding-left: 1.85rem;
+}
+.method-list p b { color: var(--text); font-weight: 600; }
+
+.method .rule-diamond { max-width: none; margin: 1.2rem 0 1rem; }
+
+.method-foot {
+  font-size: .86rem;
+  line-height: 2;
+  color: var(--muted);
+  margin: 0;
+  text-align: center;
+}
+
+/* ── 卡片 ─────────────────────────────────────────────── */
+
+.panel {
+  position: relative;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.022), transparent 40%),
+    var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: var(--pad);
+  margin-bottom: 1rem;
+  box-shadow:
+    0 1px 0 rgba(255,255,255,.03) inset,
+    0 18px 40px -24px rgba(0,0,0,.9);
+}
+
+/* 顶缘一道金色微光，像光从上方掠过卡片边沿 */
+.panel::before {
+  content: "";
+  position: absolute;
+  top: -1px; left: 12%; right: 12%;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--line-warm), transparent);
+}
+
+/* 全页只留首屏一个 h1，这里用 h2 承担同样的视觉分量 */
+.panel h2.big {
+  font-family: var(--serif);
+  font-size: 1.6rem;
+  font-weight: 600;
+  letter-spacing: .06em;
+  color: var(--text);
+  margin: 0 0 .6rem;
+}
+
+.panel h2 {
+  font-family: var(--serif);
+  font-size: 1.08rem;
+  font-weight: 600;
+  letter-spacing: .18em;
+  color: var(--gold);
+  margin: 0 0 1rem;
+}
+
+.lede { color: var(--muted); font-size: .89rem; margin: 0 0 1.4rem; }
+.lede strong { color: var(--text); font-weight: 600; }
+
+.chart-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+/* ── 表单 ─────────────────────────────────────────────── */
+
+.field-row { display: flex; gap: .7rem; margin-bottom: .85rem; }
+.field-row .field { flex: 1; min-width: 0; }
+
+.field { display: block; }
+
+.field > span {
+  display: block;
+  font-size: .74rem;
+  color: var(--muted);
+  margin-bottom: .38rem;
+  letter-spacing: .1em;
+}
+
+input[type="date"], input[type="time"], input[type="text"],
+input[type="number"], select {
+  width: 100%;
+  padding: .65rem .75rem;
+  background: rgba(0,0,0,.28);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  color: var(--text);
+  font-family: inherit;
+  font-size: .95rem;
+  min-height: 46px;
+  transition: border-color .25s, box-shadow .25s;
+}
+
+input:focus, select:focus {
+  outline: none;
+  border-color: var(--gold-dim);
+  box-shadow: 0 0 0 3px rgba(205,163,73,.10);
+}
+
+.advanced { margin: .4rem 0 1.2rem; }
+
+.advanced summary {
+  cursor: pointer;
+  font-size: .8rem;
+  color: var(--muted);
+  padding: .5rem 0;
+  list-style: none;
+  letter-spacing: .05em;
+}
+.advanced summary::-webkit-details-marker { display: none; }
+.advanced summary::before { content: "◇ "; color: var(--gold-dim); }
+.advanced[open] summary::before { content: "◆ "; }
+
+.check {
+  display: flex;
+  gap: .65rem;
+  align-items: flex-start;
+  padding: .5rem 0;
+  font-size: .87rem;
+  cursor: pointer;
+}
+.check input { margin-top: .4rem; accent-color: var(--gold); flex: none; }
+.check em {
+  display: block;
+  font-style: normal;
+  font-size: .75rem;
+  color: var(--muted);
+}
+
+.btn-primary {
+  position: relative;
+  width: 100%;
+  padding: .95rem;
+  background: linear-gradient(180deg, var(--gold-lit), var(--gold) 45%, #A9873C);
+  color: #17130B;
+  border: none;
+  border-radius: 11px;
+  font-family: var(--serif);
+  font-size: 1.05rem;
+  font-weight: 600;
+  letter-spacing: .42em;
+  text-indent: .42em;
+  cursor: pointer;
+  min-height: 50px;
+  overflow: hidden;
+  box-shadow: 0 8px 26px -12px rgba(205,163,73,.55);
+  transition: filter .25s, box-shadow .25s;
+}
+.btn-primary:active { filter: brightness(.94); }
+.btn-primary:disabled { cursor: default; filter: saturate(.5) brightness(.8); }
+
+/* 推演时一道光缓缓扫过按钮，替代常见的转圈 spinner */
+.btn-primary.casting::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(105deg, transparent 35%, rgba(255,255,255,.42), transparent 65%);
+  animation: sweep 1.5s var(--ease) infinite;
+}
+@keyframes sweep { from { transform: translateX(-100%); } to { transform: translateX(100%); } }
+
+.btn-ghost {
+  background: none;
+  border: 1px solid var(--line);
+  color: var(--muted);
+  border-radius: 9px;
+  padding: .34rem .8rem;
+  font-size: .76rem;
+  font-family: inherit;
+  cursor: pointer;
+  flex: none;
+  letter-spacing: .06em;
+  transition: color .2s, border-color .2s;
+}
+.btn-ghost:hover { color: var(--gold); border-color: var(--gold-dim); }
+
+.form-error { color: var(--fire); font-size: .85rem; margin: .8rem 0 0; }
+
+/* ── 浮现动画 ─────────────────────────────────────────── */
+
+@keyframes rise {
+  from { opacity: 0; transform: translateY(14px); }
+  to   { opacity: 1; transform: none; }
+}
+
+#result > .panel {
+  opacity: 0;
+  animation: rise .85s var(--ease) forwards;
+}
+#result > .panel:nth-child(1) { animation-delay: .05s; }
+#result > .panel:nth-child(2) { animation-delay: .22s; }
+#result > .panel:nth-child(3) { animation-delay: .34s; }
+#result > .panel:nth-child(4) { animation-delay: .46s; }
+#result > .panel:nth-child(5) { animation-delay: .58s; }
+
+/* 四柱逐柱落定——命盘是主角，值得单独一层节奏 */
+@keyframes settle {
+  from { opacity: 0; transform: translateY(9px) scale(.94); filter: blur(3px); }
+  to   { opacity: 1; transform: none; filter: none; }
+}
+.pillars .gz {
+  opacity: 0;
+  animation: settle .8s var(--ease) forwards;
+}
+.pillars td:nth-child(2) .gz { animation-delay: .30s; }
+.pillars td:nth-child(3) .gz { animation-delay: .42s; }
+.pillars td:nth-child(4) .gz { animation-delay: .54s; }
+.pillars td:nth-child(5) .gz { animation-delay: .66s; }
+
+/* ── 四柱表 ───────────────────────────────────────────── */
+
+.birth-meta {
+  font-size: .79rem;
+  color: var(--muted);
+  margin-bottom: 1.2rem;
+  line-height: 1.95;
+}
+.birth-meta b { color: var(--text); font-weight: 500; }
+
+.table-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+
+/* 四柱是全页最该一眼看全的东西，所以窄屏下压字号也不让它横向滚动。 */
+.pillars {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: center;
+  table-layout: fixed;
+}
+
+.pillars th, .pillars td {
+  padding: .45rem .12rem;
+  border-bottom: 1px solid rgba(35,41,54,.7);
+  vertical-align: middle;
+}
+.pillars tbody tr:last-child td { border-bottom: none; }
+
+.pillars thead th {
+  font-family: var(--serif);
+  font-size: .8rem;
+  color: var(--gold);
+  letter-spacing: .2em;
+  text-indent: .2em;
+  font-weight: 600;
+  padding-bottom: .7rem;
+  border-bottom-color: var(--line-warm);
+}
+
+.pillars .row-label {
+  text-align: right;
+  font-size: .65rem;
+  color: var(--faint);
+  white-space: nowrap;
+  padding-right: .5rem;
+  width: 2.5rem;
+  letter-spacing: .06em;
+}
+
+.gz {
+  display: inline-block;
+  font-family: var(--serif);
+  font-size: 1.85rem;
+  line-height: 1.25;
+  font-weight: 600;
+}
+
+.pillars .god { font-size: .71rem; color: var(--muted); letter-spacing: .04em; }
+.pillars .day-master {
+  color: var(--gold);
+  font-weight: 600;
+  text-shadow: 0 0 14px rgba(205,163,73,.5);
+}
+.hidden-stems { font-size: .69rem; line-height: 1.75; white-space: nowrap; }
+.hidden-stems .hs-god { color: var(--faint); font-size: .61rem; }
+.pillars .small { font-size: .67rem; color: var(--muted); }
+
+/* 五行着色。干支字带同色微光，让字「发亮」而不是「涂色」 */
+.e-木 { color: var(--wood); }
+.e-火 { color: var(--fire); }
+.e-土 { color: var(--earth); }
+.e-金 { color: var(--metal); }
+.e-水 { color: var(--water); }
+
+.gz.e-木 { text-shadow: 0 0 18px rgba(98,168,123,.35); }
+.gz.e-火 { text-shadow: 0 0 18px rgba(208,100,80,.35); }
+.gz.e-土 { text-shadow: 0 0 18px rgba(200,154,91,.35); }
+.gz.e-金 { text-shadow: 0 0 18px rgba(220,214,198,.30); }
+.gz.e-水 { text-shadow: 0 0 18px rgba(95,151,196,.35); }
+
+/* ── 五行生克图 ───────────────────────────────────────── */
+
+.wuxing { display: block; width: 100%; max-width: 320px; margin: 0 auto .4rem; }
+
+.wuxing-edge      { stroke: rgba(205,163,73,.20); stroke-width: .5; fill: none; }
+.wuxing-ke   { stroke: rgba(139,133,120,.11); stroke-width: .35; fill: none;
+                stroke-dasharray: 1.8 2.6; }
+.wuxing-glyph { font-family: var(--serif); font-size: 6.6px; font-weight: 600;
+                text-anchor: middle; dominant-baseline: central; }
+.wuxing-pct       { font-size: 3.6px; text-anchor: middle; fill: var(--muted);
+                dominant-baseline: central; letter-spacing: .02em; }
+
+.wuxing-legend {
+  display: flex;
+  justify-content: center;
+  gap: 1rem;
+  font-size: .68rem;
+  color: var(--faint);
+  margin-bottom: 1rem;
+  letter-spacing: .05em;
+}
+.wuxing-legend i { font-style: normal; }
+
+.verdict {
+  border-top: 1px solid var(--line);
+  padding-top: 1.1rem;
+  font-size: .87rem;
+  line-height: 1.9;
+}
+.verdict dt {
+  color: var(--gold-dim);
+  font-size: .7rem;
+  letter-spacing: .16em;
+  margin-bottom: .05rem;
+}
+.verdict dd { margin: 0 0 .85rem; }
+.verdict dd:last-child { margin-bottom: 0; }
+
+/* ── 大运 ─────────────────────────────────────────────── */
+
+.luck-start { font-size: .8rem; color: var(--muted); margin: 0 0 1rem; }
+
+.luck-strip { display: flex; gap: .5rem; padding: .15rem .15rem .4rem; }
+
+.luck-cell {
+  flex: none;
+  width: 4.7rem;
+  padding: .6rem .3rem;
+  background: rgba(0,0,0,.24);
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  text-align: center;
+  transition: border-color .3s, background .3s;
+}
+.luck-cell.current {
+  border-color: var(--gold-dim);
+  background: rgba(205,163,73,.07);
+  box-shadow: 0 0 22px -6px rgba(205,163,73,.35);
+}
+.luck-cell .lg { font-family: var(--serif); font-size: 1.32rem; line-height: 1.3; }
+.luck-cell.current .lg { color: var(--gold-lit); }
+.luck-cell .lt { font-size: .66rem; color: var(--muted); }
+.luck-cell .ly { font-size: .63rem; color: var(--faint); margin-top: .25rem; }
+
+/* ── 标签组 ───────────────────────────────────────────── */
+
+.tag-groups { display: grid; gap: .75rem; }
+.tag-group { display: flex; flex-wrap: wrap; gap: .35rem; align-items: baseline; }
+.tag-group > .tg-label {
+  font-size: .7rem; color: var(--faint); width: 4rem; flex: none;
+  letter-spacing: .1em;
+}
+
+.tag {
+  font-size: .75rem;
+  padding: .2rem .6rem;
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  background: rgba(0,0,0,.2);
+  color: var(--muted);
+}
+.tag.good { border-color: var(--line-warm); color: var(--gold); }
+.tag.warn { border-color: rgba(208,100,80,.28); color: #C88476; }
+
+/* ── 引流 ─────────────────────────────────────────────── */
+
+.wechat-panel {
+  border-color: var(--line-warm);
+  background:
+    radial-gradient(90% 70% at 50% 0%, rgba(205,163,73,.07), transparent 65%),
+    var(--surface);
+}
+
+.wechat-lead {
+  font-size: .93rem;
+  line-height: 1.95;
+  color: var(--text);
+  margin: 0 0 1.3rem;
+}
+
+.q-hint {
+  font-size: .76rem;
+  color: var(--muted);
+  margin: 0;
+  letter-spacing: .05em;
+}
+
+.suggestions { display: flex; flex-wrap: wrap; gap: .42rem; margin: .7rem 0 1.4rem; }
+
+.chip {
+  font-size: .78rem;
+  padding: .4rem .8rem;
+  background: rgba(0,0,0,.24);
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  color: var(--muted);
+  font-family: inherit;
+  cursor: pointer;
+  min-height: 34px;
+  transition: color .22s, border-color .22s, background .22s;
+}
+.chip:hover, .chip:active {
+  color: var(--gold-lit);
+  border-color: var(--gold-dim);
+  background: rgba(205,163,73,.07);
+}
+
+.wechat-card {
+  background: rgba(0,0,0,.26);
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  padding: 1.25rem 1.1rem;
+  text-align: center;
+}
+
+/* 二维码必须落在浅底上才扫得动——深色底会让识别率明显下降 */
+.qr {
+  width: 172px;
+  height: 172px;
+  display: block;
+  margin: 0 auto 1rem;
+  background: #fff;
+  padding: 9px;
+  border-radius: 11px;
+  box-shadow: 0 0 34px -8px rgba(205,163,73,.35);
+}
+
+.wx-id-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: .55rem;
+  flex-wrap: wrap;
+}
+
+.wx-label { font-size: .74rem; color: var(--faint); letter-spacing: .1em; }
+
+#wx-id {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 1.05rem;
+  color: var(--gold-lit);
+  letter-spacing: .05em;
+  word-break: break-all;
+}
+
+.btn-copy {
+  background: none;
+  border: 1px solid var(--gold-dim);
+  color: var(--gold);
+  border-radius: 8px;
+  padding: .32rem .75rem;
+  font-size: .77rem;
+  font-family: inherit;
+  cursor: pointer;
+  min-height: 32px;
+  flex: none;
+  transition: background .2s;
+}
+.btn-copy:active { background: rgba(205,163,73,.16); }
+
+.wx-hint {
+  font-size: .73rem;
+  color: var(--faint);
+  margin: .8rem 0 0;
+  line-height: 1.75;
+}
+
+.wx-offer {
+  font-size: .85rem;
+  color: var(--text);
+  margin: 1rem 0 0;
+  padding-top: 1rem;
+  border-top: 1px solid var(--line);
+  line-height: 1.85;
+}
+
+/* ── 提示条 ───────────────────────────────────────────── */
+
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: 1.6rem;
+  transform: translate(-50%, 1rem);
+  max-width: calc(100vw - 2.5rem);
+  background: rgba(28,32,42,.96);
+  backdrop-filter: blur(8px);
+  border: 1px solid var(--line-warm);
+  color: var(--text);
+  font-size: .83rem;
+  padding: .65rem 1.1rem;
+  border-radius: 24px;
+  box-shadow: 0 12px 32px rgba(0,0,0,.6);
+  opacity: 0;
+  transition: opacity .3s var(--ease), transform .3s var(--ease);
+  z-index: 50;
+  pointer-events: none;
+}
+.toast.show { opacity: 1; transform: translate(-50%, 0); }
+
+/* ── 页脚 ─────────────────────────────────────────────── */
+
+footer {
+  margin-top: 3rem;
+  padding-top: 1.6rem;
+  border-top: 1px solid var(--line);
+  font-size: .74rem;
+  color: var(--faint);
+  line-height: 1.85;
+}
+
+/* ── 桌面端 ───────────────────────────────────────────── */
+
+@media (min-width: 620px) {
+  :root { --pad: 1.7rem; }
+  .gz { font-size: 2.35rem; }
+  .qr { width: 200px; height: 200px; }
+  .pillars th, .pillars td { padding: .5rem .3rem; }
+  .pillars thead th { font-size: .94rem; }
+  .pillars .row-label { width: 3.6rem; font-size: .73rem; padding-right: .85rem; }
+  .pillars .god { font-size: .79rem; }
+  .hidden-stems { font-size: .79rem; }
+  .hidden-stems .hs-god { font-size: .69rem; }
+  .pillars .small { font-size: .77rem; }
+  .wuxing { max-width: 360px; }
+
+  /* 宽屏改成左右分栏：文字居左，太极退到右侧半幅，
+     窄屏那种「压在暗面上」的重叠在宽屏会显得拥挤。 */
+  .hero { min-height: 68vh; padding: 2rem 0 3.4rem; }
+  .hero-art { right: -6%; width: 62%; }
+  .hero-copy { max-width: 60%; }
+  .hero-title { font-size: clamp(3.2rem, 5.6vw, 4.6rem); }
+  .hero-cta { max-width: 27rem; }
+  .method-list p { padding-left: 2.1rem; }
+}
+
+/* 尊重系统偏好：关掉一切位移与自转，只留不透明度 */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+  }
+  #result > .panel, .pillars .gz { opacity: 1; }
+  .ring, .taiji-spin, .twinkle { animation: none; }
+  .twinkle { opacity: .7; }
+}

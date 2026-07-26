@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>子牙品命 · 八字排盘与问命</title>
+<meta name="description" content="高精度八字排盘：节气按太阳视黄经实时推算，时柱经真太阳时校正。排盘免费，不限次数。">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%2313110F'/%3E%3Ctext x='16' y='23' font-size='20' font-family='serif' fill='%23C9A961' text-anchor='middle'%3E%E5%AD%90%3C/text%3E%3C/svg%3E">
+<link rel="stylesheet" href="/static/style.css?v=__V__">
+</head>
+<body>
+
+<!-- 氛围层：十二地支环。极低不透明度 + 极慢自转，
+     属于潜意识层面的背景，不是让人「看见」的装饰。位置与速度见 CSS .ring -->
+<svg class="ring" viewBox="0 0 100 100" aria-hidden="true" focusable="false">
+  <circle cx="50" cy="50" r="45.5" fill="none" stroke="#CDA349" stroke-width=".25"/>
+  <circle cx="50" cy="50" r="38"   fill="none" stroke="#CDA349" stroke-width=".15"/>
+  <circle cx="50" cy="50" r="30"   fill="none" stroke="#CDA349" stroke-width=".1"/>
+  <g fill="#CDA349" font-family="Songti SC, STSong, serif" font-size="4.6"
+     text-anchor="middle" dominant-baseline="central">
+    <text x="50"    y="5">子</text>
+    <text x="72.5"  y="11.03">丑</text>
+    <text x="88.97" y="27.5">寅</text>
+    <text x="95"    y="50">卯</text>
+    <text x="88.97" y="72.5">辰</text>
+    <text x="72.5"  y="88.97">巳</text>
+    <text x="50"    y="95">午</text>
+    <text x="27.5"  y="88.97">未</text>
+    <text x="11.03" y="72.5">申</text>
+    <text x="5"     y="50">酉</text>
+    <text x="11.03" y="27.5">戌</text>
+    <text x="27.5"  y="11.03">亥</text>
+  </g>
+</svg>
+
+<header class="masthead">
+  <div class="brand">
+    <span class="brand-mark">子牙品命</span>
+    <span class="brand-sub">子平八字 · 排盘问命</span>
+  </div>
+</header>
+
+<main>
+
+<!-- ══ 落地：首屏 + 表单 + 体系。出结果后整块隐藏 ══════════════ -->
+<div id="landing">
+
+<!-- ── 首屏：宇宙尺度的太极 ─────────────────────────────────
+     宿命感来自「人在浩大之中很小」这个构图，而不是特效堆砌。
+     太极、星场、光晕全部是 SVG/CSS，没有图片体积。
+     若要换成生成图，见 .hero-art 的说明。 -->
+<section class="hero">
+  <div class="hero-art">
+    <svg class="starfield" id="starfield" aria-hidden="true"></svg>
+
+    <!-- 太极的立体感靠一条规矩：材质随盘旋转，光不转。
+         所以 .taiji-spin 里只放阴阳面与鱼眼，光照层和边缘光留在外面，
+         光源恒定在左上——实体被照亮就是这个样子，光跟着转就成了贴纸。 -->
+    <svg class="taiji" viewBox="0 0 200 200" aria-hidden="true">
+      <defs>
+        <!-- 阴：近墨的深海蓝，不用饱和蓝，避开「塑料玩具」感 -->
+        <radialGradient id="yin" cx="50%" cy="46%" r="72%">
+          <stop offset="0%"   stop-color="#1B3E60"/>
+          <stop offset="42%"  stop-color="#102944"/>
+          <stop offset="76%"  stop-color="#08182A"/>
+          <stop offset="100%" stop-color="#040A13"/>
+        </radialGradient>
+        <!-- 阳：香槟珠光。高饱和的金最容易显廉价，压低彩度换质感 -->
+        <radialGradient id="yang" cx="50%" cy="54%" r="72%">
+          <stop offset="0%"   stop-color="#FCF4E2"/>
+          <stop offset="34%"  stop-color="#EEDCB4"/>
+          <stop offset="70%"  stop-color="#C9A76D"/>
+          <stop offset="100%" stop-color="#8A6836"/>
+        </radialGradient>
+
+        <!-- 星云：两团不同色相的极淡光斑，让暗面有层次而不是平涂 -->
+        <radialGradient id="neb1">
+          <stop offset="0%"   stop-color="#4C8FC4" stop-opacity=".5"/>
+          <stop offset="100%" stop-color="#4C8FC4" stop-opacity="0"/>
+        </radialGradient>
+        <radialGradient id="neb2">
+          <stop offset="0%"   stop-color="#7C5EAE" stop-opacity=".38"/>
+          <stop offset="100%" stop-color="#7C5EAE" stop-opacity="0"/>
+        </radialGradient>
+
+        <!-- 光照层：主光左上、补光右下，都不随盘旋转 -->
+        <radialGradient id="keyLight">
+          <stop offset="0%"   stop-color="#FFF6DF" stop-opacity=".42"/>
+          <stop offset="55%"  stop-color="#FFE7B4" stop-opacity=".12"/>
+          <stop offset="100%" stop-color="#FFE7B4" stop-opacity="0"/>
+        </radialGradient>
+        <!-- 暗侧衰减要克制：压过头金面会发灰，反倒像脏了 -->
+        <radialGradient id="fillShade">
+          <stop offset="0%"   stop-color="#03070E" stop-opacity=".34"/>
+          <stop offset="60%"  stop-color="#03070E" stop-opacity=".12"/>
+          <stop offset="100%" stop-color="#03070E" stop-opacity="0"/>
+        </radialGradient>
+
+        <!-- 边缘光：左上最亮，绕到右下衰减为零 -->
+        <linearGradient id="rimWarm" x1="14%" y1="2%" x2="86%" y2="98%">
+          <stop offset="0%"   stop-color="#FFEDC4" stop-opacity=".95"/>
+          <stop offset="22%"  stop-color="#E4BE72" stop-opacity=".5"/>
+          <stop offset="50%"  stop-color="#CDA349" stop-opacity=".1"/>
+          <stop offset="100%" stop-color="#CDA349" stop-opacity="0"/>
+        </linearGradient>
+        <!-- 右下的冷色反弹光，三维里让物体「离开背景」的常用手法 -->
+        <linearGradient id="rimCool" x1="86%" y1="98%" x2="30%" y2="20%">
+          <stop offset="0%"   stop-color="#8FC4EE" stop-opacity=".5"/>
+          <stop offset="34%"  stop-color="#5C93C4" stop-opacity=".14"/>
+          <stop offset="100%" stop-color="#5C93C4" stop-opacity="0"/>
+        </linearGradient>
+
+        <radialGradient id="halo">
+          <stop offset="66%"  stop-color="rgba(205,163,73,0)"/>
+          <stop offset="86%"  stop-color="rgba(205,163,73,.16)"/>
+          <stop offset="100%" stop-color="rgba(205,163,73,0)"/>
+        </radialGradient>
+
+        <radialGradient id="pearlDark" cx="38%" cy="34%">
+          <stop offset="0%"   stop-color="#2A4666"/>
+          <stop offset="60%"  stop-color="#0C1A2B"/>
+          <stop offset="100%" stop-color="#04090F"/>
+        </radialGradient>
+        <radialGradient id="pearlLight" cx="38%" cy="34%">
+          <stop offset="0%"   stop-color="#FFFCF3"/>
+          <stop offset="58%"  stop-color="#EDDDBA"/>
+          <stop offset="100%" stop-color="#B8955E"/>
+        </radialGradient>
+
+        <clipPath id="disc"><circle cx="100" cy="100" r="90"/></clipPath>
+        <filter id="soft" x="-50%" y="-50%" width="200%" height="200%">
+          <feGaussianBlur stdDeviation="2.6"/>
+        </filter>
+        <filter id="seam" x="-30%" y="-30%" width="160%" height="160%">
+          <feDropShadow dx="0" dy="0" stdDeviation="1.8"
+                        flood-color="#02060C" flood-opacity=".65"/>
+        </filter>
+      </defs>
+
+      <circle cx="100" cy="100" r="99" fill="url(#halo)"/>
+
+      <g clip-path="url(#disc)">
+        <!-- ── 随盘旋转的材质 ── -->
+        <g class="taiji-spin">
+          <circle cx="100" cy="100" r="90" fill="url(#yin)"/>
+          <ellipse cx="62" cy="66" rx="52" ry="44" fill="url(#neb1)"/>
+          <ellipse cx="126" cy="42" rx="40" ry="34" fill="url(#neb2)"/>
+
+          <!-- 经典太极：大弧走一侧，两段半径减半的小弧勾出 S 形。
+               投影落在交界处，两面才分得开、不显扁平。 -->
+          <path d="M100,10 a90,90 0 0,1 0,180 a45,45 0 0,1 0,-90 a45,45 0 0,0 0,-90 z"
+                fill="url(#yang)" filter="url(#seam)"/>
+
+          <!-- 阴中有阳、阳中有阴：按上面的路径，(100,55) 在阴面、(100,145) 在阳面，
+               所以前者必须是白点、后者必须是黑点。填反了两个点就各自与所在半面
+               同色，太极最核心的意思就没了。 -->
+          <circle cx="100" cy="55"  r="15" fill="url(#pearlLight)"/>
+          <circle cx="100" cy="145" r="15" fill="url(#pearlDark)"/>
+
+          <g class="taiji-stars">
+            <circle cx="62"  cy="58"  r="1.2" fill="#EAF3FF" opacity=".9"/>
+            <circle cx="48"  cy="96"  r=".8"  fill="#CFE3F5" opacity=".75"/>
+            <circle cx="74"  cy="34"  r=".7"  fill="#CFE3F5" opacity=".6"/>
+            <circle cx="55"  cy="132" r=".95" fill="#EAF3FF" opacity=".8"/>
+            <circle cx="82"  cy="162" r=".7"  fill="#CFE3F5" opacity=".55"/>
+            <circle cx="38"  cy="118" r=".6"  fill="#CFE3F5" opacity=".5"/>
+            <circle cx="68"  cy="82"  r=".5"  fill="#CFE3F5" opacity=".45"/>
+            <circle cx="92"  cy="26"  r=".85" fill="#EAF3FF" opacity=".85"/>
+            <circle cx="44"  cy="72"  r=".5"  fill="#CFE3F5" opacity=".4"/>
+            <circle cx="70"  cy="112" r=".55" fill="#CFE3F5" opacity=".45"/>
+          </g>
+        </g>
+
+        <!-- ── 恒定光照：不随盘转 ── -->
+        <ellipse cx="66" cy="56" rx="86" ry="78" fill="url(#keyLight)"/>
+        <ellipse cx="152" cy="160" rx="76" ry="66" fill="url(#fillShade)"/>
+      </g>
+
+      <!-- ── 边缘光与外环：同样不转 ── -->
+      <circle cx="100" cy="100" r="90" fill="none"
+              stroke="url(#rimCool)" stroke-width="1.6"/>
+      <circle cx="100" cy="100" r="90" fill="none"
+              stroke="url(#rimWarm)" stroke-width="1.9"/>
+      <circle cx="100" cy="100" r="90" fill="none"
+              stroke="url(#rimWarm)" stroke-width="3.4" filter="url(#soft)" opacity=".55"/>
+      <circle cx="100" cy="100" r="95.5" fill="none"
+              stroke="rgba(205,163,73,.13)" stroke-width=".35"/>
+      <circle cx="100" cy="100" r="98.5" fill="none"
+              stroke="rgba(205,163,73,.07)" stroke-width=".25"/>
+    </svg>
+  </div>
+
+  <div class="hero-copy">
+    <p class="eyebrow">子平八字 · 真太阳时排盘</p>
+    <h1 class="hero-title">
+      <span class="t-gold">品命，</span>
+      <span class="t-plain">茗有余香</span>
+    </h1>
+    <div class="rule-diamond"><i></i></div>
+    <p class="hero-sub">
+      以节气为纲，以真太阳时为尺<br>
+      为你排一张精确到秒的命盘
+    </p>
+
+    <div class="trust">
+      <span><b>◷</b> 约 10 秒</span>
+      <span><b>◈</b> 完全免费</span>
+      <span><b>⛨</b> 不留存生日</span>
+    </div>
+
+    <div class="hero-cta">
+      <button type="button" class="btn-primary" id="go-form">开始排盘</button>
+      <a class="btn-outline" href="#method">了解体系</a>
+    </div>
+  </div>
+</section>
+
+<!-- ── 排盘表单 ───────────────────────────────────────────── -->
+<section id="intake" class="panel">
+  <h2 class="big">排一张你的命盘</h2>
+  <p class="lede">
+    节气按太阳视黄经实时推算，误差以秒计；时柱经真太阳时校正。
+    <strong>排盘免费，不限次数。</strong>
+  </p>
+
+  <form id="birth-form">
+    <div class="field-row">
+      <label class="field">
+        <span>出生日期</span>
+        <input type="date" name="date" required>
+      </label>
+      <label class="field">
+        <span>出生时刻</span>
+        <input type="time" name="time" required>
+      </label>
+    </div>
+
+    <div class="field-row">
+      <label class="field">
+        <span>性别</span>
+        <select name="gender">
+          <option value="male">男</option>
+          <option value="female">女</option>
+        </select>
+      </label>
+      <label class="field">
+        <span>出生地</span>
+        <select name="city" id="city-select"></select>
+      </label>
+    </div>
+
+    <details class="advanced">
+      <summary>高级选项</summary>
+      <label class="check">
+        <input type="checkbox" name="tst" checked>
+        <span>启用真太阳时校正
+          <em>按出生地经度与均时差修正，时柱更准</em></span>
+      </label>
+      <label class="check">
+        <input type="checkbox" name="latezi" checked>
+        <span>晚子时归次日（子正换日）
+          <em>关闭则按夜半换日，两派皆有所本</em></span>
+      </label>
+      <label class="field">
+        <span>自定经度（东经为正）</span>
+        <input type="number" name="longitude" step="0.01" min="-180" max="180" placeholder="留空则用所选城市">
+      </label>
+    </details>
+
+    <button type="submit" class="btn-primary">排 盘</button>
+    <p class="form-error" id="form-error" hidden></p>
+  </form>
+</section>
+
+<!-- ── 体系：为什么这张盘更准 ─────────────────────────────────
+     这三条是真正的差异点，也是「了解体系」按钮的落点。 -->
+<section class="panel method" id="method">
+  <h2>为什么这张盘更准</h2>
+  <p class="lede">同一个生辰，不同程序会排出不同的盘。差别都在这三处。</p>
+
+  <ol class="method-list">
+    <li>
+      <div class="m-head"><span class="m-no">壹</span><b>节气按天文推算</b></div>
+      <p>多数程序查预置表，覆盖年份有限、边界误差可达数十分钟。
+         这里用截断 VSOP87 级数实时解太阳视黄经，
+         实测对天文台公布值误差在<b>三十秒以内</b>。</p>
+    </li>
+    <li>
+      <div class="m-head"><span class="m-no">贰</span><b>年月柱以节气换</b></div>
+      <p>年柱换于<b>立春</b>那一刻，不是元旦，也不是正月初一；
+         月柱换于十二「节」，不是农历月，也不是「气」。
+         生在交节前后几分钟的人，错一处便满盘皆错。</p>
+    </li>
+    <li>
+      <div class="m-head"><span class="m-no">叁</span><b>时柱用真太阳时</b></div>
+      <p>全国同用北京时间，但乌鲁木齐的日中比北京晚近两小时。
+         按出生地经度与均时差还原真太阳时，
+         时柱才落在对的时辰上。</p>
+    </li>
+  </ol>
+
+  <div class="rule-diamond"><i></i></div>
+  <p class="method-foot">
+    命理讲的是倾向与节奏，不是既定的结局。<br>
+    但要谈倾向，先得有一张排对的盘。
+  </p>
+</section>
+
+</div><!-- /#landing -->
+
+<!-- ── 命盘结果 ───────────────────────────────────────────── -->
+<section id="result" hidden>
+
+  <div class="panel chart-panel">
+    <div class="chart-head">
+      <h2>命盘</h2>
+      <button class="btn-ghost" id="redo">重新排盘</button>
+    </div>
+    <div class="birth-meta" id="birth-meta"></div>
+    <div class="table-scroll">
+      <table class="pillars" id="pillars"></table>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>五行生克</h2>
+    <!-- viewBox 向外留白：百分比标签落在节点外侧，0 0 100 100 会把它们裁掉 -->
+    <svg class="wuxing" id="wuxing" viewBox="-12 -10 124 122" role="img"
+         aria-label="五行力量与生克关系图"></svg>
+    <div class="wuxing-legend">
+      <i>— 外环相生</i>
+      <i>┄ 内星相克</i>
+    </div>
+    <div class="verdict" id="verdict"></div>
+  </div>
+
+  <div class="panel">
+    <h2>大运</h2>
+    <p class="luck-start" id="luck-start"></p>
+    <div class="table-scroll">
+      <div class="luck-strip" id="luck-strip"></div>
+    </div>
+  </div>
+
+  <div class="panel" id="shensha-panel">
+    <h2>神煞 · 刑冲合害</h2>
+    <div class="tag-groups" id="shensha"></div>
+  </div>
+
+  <!-- 引流：盘给完整，解读留给真人 -->
+  <div class="panel wechat-panel" id="wechat">
+    <h2>盘已排好，但这只是骨架</h2>
+    <p class="wechat-lead">
+      格局高低、喜忌走向、这一步大运落到你身上究竟意味着什么——
+      盘面本身不会说话，得有人读。
+    </p>
+
+    <p class="q-hint">点一个你想问的，八字和问题会一起复制好：</p>
+    <div class="suggestions" id="suggestions">
+      <button class="chip">我今年的运势如何？</button>
+      <button class="chip">我适合做什么行业？</button>
+      <button class="chip">我的性格弱点在哪里？</button>
+      <button class="chip">什么时候是我的上升期？</button>
+      <button class="chip">我的感情什么时候有着落？</button>
+    </div>
+
+    <div class="wechat-card">
+      <img class="qr" id="wx-qr" alt="微信二维码" hidden>
+      <div class="wx-id-row">
+        <span class="wx-label">微信号</span>
+        <code id="wx-id">…</code>
+        <button class="btn-copy" id="copy-wx">复制</button>
+      </div>
+      <p class="wx-hint" id="wx-hint"></p>
+      <p class="wx-offer" id="wx-offer"></p>
+    </div>
+  </div>
+
+  <div class="toast" id="toast" hidden></div>
+
+</section>
+
+<footer>
+  <p>命理是一套传统的解释框架，讲的是倾向与节奏，不是既定的结局。
+     本站内容不构成医疗、法律或投资建议。</p>
+</footer>
+
+</main>
+
+<script src="/static/app.js?v=__V__"></script>
+</body>
+</html>

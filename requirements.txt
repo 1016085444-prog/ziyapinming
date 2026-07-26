@@ -1,0 +1,9 @@
+# 线上运行只需要这三个
+fastapi==0.128.8
+uvicorn==0.39.0
+pydantic==2.13.4
+
+# 以下仅供已停用的模块使用（bazi/ai.py、payments.py）。
+# 恢复 AI 问命或自助购买时再装，日常部署不需要：
+#   anthropic==0.120.0
+#   stripe==15.3.1

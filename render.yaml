@@ -1,0 +1,20 @@
+# Render 一键部署配置。
+# 在 render.com 上连接这个仓库，它会自动读到这个文件，不用手填任何设置。
+#
+# 免费套餐会在无访问约 15 分钟后休眠，下次访问冷启动约 30 秒。
+# 引流站冷启动会掉转化——上线跑起量之后建议升到付费套餐（约 $7/月）常驻。
+services:
+  - type: web
+    name: ziya-pinming
+    runtime: python
+    plan: free
+    region: singapore          # 离大陆最近的可选区域，延迟明显好于美国节点
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/config
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.8
+      # 微信号已写死在 config.py 里；若想改成部署时注入，取消下面两行注释：
+      # - key: WECHAT_ID
+      #   sync: false
