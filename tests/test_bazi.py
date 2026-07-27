@@ -250,3 +250,59 @@ class TestGanzhiPrimitives(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class TestScoring(unittest.TestCase):
+    """多维评分。重点不是「分对不对」——命理本无标准答案——
+    而是口径稳定、边界不越、每项都说得出依据。"""
+
+    def _chart(self, **kw):
+        base = dict(year=1990, month=5, day=20, hour=10, minute=30,
+                    gender="female", longitude=121.47)
+        base.update(kw)
+        return build_chart(**base)
+
+    def test_shape_and_bounds(self):
+        from bazi.scoring import score_chart, DIMENSIONS, FLOOR, CEIL
+        r = score_chart(self._chart())
+        self.assertEqual(set(r["维度"]), set(DIMENSIONS))
+        for d in DIMENSIONS:
+            item = r["维度"][d]
+            self.assertGreaterEqual(item["分数"], FLOOR)
+            self.assertLessEqual(item["分数"], CEIL)
+            self.assertTrue(item["依据"], d + " 缺少依据")
+
+    def test_deterministic(self):
+        """同一生辰必须每次给出同样的分，否则用户截图对不上就崩了信任。"""
+        from bazi.scoring import score_chart
+        a = score_chart(self._chart())
+        b = score_chart(self._chart())
+        self.assertEqual(a["维度"], b["维度"])
+
+    def test_low_score_carries_advice(self):
+        """低分项必须给出方向，只列问题不给出路是产品事故。"""
+        from bazi.scoring import score_chart, ADVICE
+        r = score_chart(self._chart())
+        for name, item in r["维度"].items():
+            if item["分数"] < 52:
+                self.assertIn(ADVICE[name], item["依据"],
+                              name + " 分低却没给方向")
+
+    def test_no_crash_across_wide_range(self):
+        from bazi.scoring import score_chart, DIMENSIONS, FLOOR, CEIL
+        for year in (1930, 1955, 1986, 1990, 2001, 2024):
+            for hour in (0, 6, 13, 23):
+                for gender in ("male", "female"):
+                    r = score_chart(self._chart(year=year, hour=hour,
+                                                gender=gender))
+                    for d in DIMENSIONS:
+                        s = r["维度"][d]["分数"]
+                        self.assertTrue(FLOOR <= s <= CEIL)
+
+    def test_summary_names_extremes(self):
+        from bazi.scoring import score_chart
+        r = score_chart(self._chart())
+        self.assertIn(r["最强"], r["维度"])
+        self.assertIn(r["最弱"], r["维度"])
+        self.assertGreaterEqual(r["维度"][r["最强"]]["分数"],
+                                r["维度"][r["最弱"]]["分数"])

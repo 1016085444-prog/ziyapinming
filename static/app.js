@@ -99,32 +99,113 @@ const CAST_BEAT = 850;
 
 // ── 初始化 ───────────────────────────────────────────────
 
-(function initLocation() {
-  const prov = $('#province-select');
-  const city = $('#city-select');
+/* 出生地摊平成一维可搜索列表。
+   放弃「省 → 市」两级下拉有两个原因：一是微信内置浏览器对长 select
+   下拉有渲染问题，而这里正卡在唯一的转化路径上；二是两级要求用户先想起
+   「苏州属江苏」，摊平后直接搜城市名，少一步操作也少一层认知负担。 */
+const PLACES = [];
+REGIONS.forEach(function (region) {
+  const prov = region[0];
+  region[1].forEach(function (c) {
+    PLACES.push({
+      city: c[0],
+      prov: prov,
+      // 直辖市与港澳的省市同名，不重复显示
+      label: prov === c[0] ? c[0] : prov + ' · ' + c[0],
+      plain: prov === c[0] ? c[0] : prov + c[0],
+      lon: c[1],
+      tz: c[2] === undefined ? 8 : c[2],
+    });
+  });
+});
 
-  REGIONS.forEach(([name], i) => prov.add(new Option(name, String(i))));
+const HOT = ['北京', '上海', '广州', '深圳', '成都', '杭州',
+             '武汉', '西安', '重庆', '南京', '天津', '长沙'];
 
-  function fillCities() {
-    const cities = REGIONS[Number(prov.value)][1];
-    city.innerHTML = '';
-    cities.forEach(([name], i) => city.add(new Option(name, String(i))));
-    // 直辖市和港澳只有一个选项，多一个下拉徒增操作，直接收起来
-    city.parentElement.parentElement.hidden = cities.length === 1;
+let chosenPlace = PLACES.find(function (p) { return p.city === '上海'; }) || PLACES[0];
+
+(function initPlacePicker() {
+  const btn = $('#place-btn');
+  const label = $('#place-label');
+  const sheet = $('#place-sheet');
+  const search = $('#place-search');
+  const list = $('#place-list');
+
+  function paint() { label.textContent = chosenPlace.label; }
+
+  function row(p) {
+    const b = el('button', 'place-row', p.label);
+    b.type = 'button';
+    if (p === chosenPlace) b.classList.add('on');
+    b.addEventListener('click', function () {
+      chosenPlace = p;
+      paint();
+      close();
+    });
+    return b;
   }
 
-  prov.addEventListener('change', fillCities);
-  fillCities();
+  function render(q) {
+    q = (q || '').trim();
+    list.innerHTML = '';
+
+    if (!q) {
+      // 无搜索词时先摆常用城市：为了选北京也要滚过三十几个省不合理
+      list.append(el('div', 'sheet-group', '常用'));
+      HOT.forEach(function (n) {
+        const hit = PLACES.find(function (p) { return p.city === n; });
+        if (hit) list.append(row(hit));
+      });
+      list.append(el('div', 'sheet-group', '全部'));
+      PLACES.forEach(function (p) { list.append(row(p)); });
+      return;
+    }
+
+    const hits = PLACES.filter(function (p) {
+      return p.city.indexOf(q) >= 0 || p.prov.indexOf(q) >= 0;
+    });
+    if (!hits.length) {
+      list.append(el('p', 'sheet-empty',
+        '没找到「' + q + '」。可以试省份名，或选同省最近的城市——' +
+        '省内经度差通常不足以改变时辰。'));
+      return;
+    }
+    hits.forEach(function (p) { list.append(row(p)); });
+  }
+
+  function open() {
+    sheet.hidden = false;
+    document.body.classList.add('sheet-open');
+    search.value = '';
+    render('');
+    list.scrollTop = 0;
+    // 故意不自动聚焦搜索框：iOS 会立刻弹出键盘挡掉半屏列表，
+    // 而多数人是来浏览常用城市的，不是来打字的。
+  }
+
+  function close() {
+    sheet.hidden = true;
+    document.body.classList.remove('sheet-open');
+  }
+
+  btn.addEventListener('click', open);
+  sheet.addEventListener('click', function (e) {
+    if (e.target.closest('[data-close]')) close();
+  });
+  search.addEventListener('input', function () { render(search.value); });
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape' && !sheet.hidden) close();
+  });
+
+  paint();
 })();
 
 /** 读取当前选中的出生地。返回 { name, longitude, tz }。 */
 function selectedPlace() {
-  const [provName, cities] = REGIONS[Number($('#province-select').value)];
-  const [name, lon, tz] = cities[Number($('#city-select').value) || 0];
   return {
-    name: provName === name ? name : provName + name,
-    longitude: lon,
-    tz: tz === undefined ? 8 : tz,
+    name: chosenPlace.plain,
+    longitude: chosenPlace.lon,
+    tz: chosenPlace.tz,
   };
 }
 
@@ -338,9 +419,105 @@ function render(data, placeName) {
 
   renderMeta(chart);
   renderPillars(chart);
+  renderScores(data.scores);
   renderElements(data.analysis);
   renderLuck(chart, data.years);
   renderShensha(chart);
+}
+
+/* 五维雷达图。半径直接按分数比例走（分数区间 38–96，映射到 38%–96% 半径），
+   不做二次拉伸——拉伸会把差距夸大，看着刺激但不诚实。 */
+const RADAR_R = 34;
+
+function renderScores(data) {
+  if (!data) return;
+  const svg = $('#radar');
+  svg.innerHTML = '';
+
+  const dims = Object.keys(data['维度']);
+  const pts = dims.map(function (name, i) {
+    const rad = ((-90 + i * (360 / dims.length)) * Math.PI) / 180;
+    const score = data['维度'][name]['分数'];
+    return { name: name, score: score, rad: rad,
+             x: 50 + RADAR_R * (score / 100) * Math.cos(rad),
+             y: 50 + RADAR_R * (score / 100) * Math.sin(rad) };
+  });
+
+  const ring = function (frac) {
+    return pts.map(function (p) {
+      return (50 + RADAR_R * frac * Math.cos(p.rad)).toFixed(2) + ',' +
+             (50 + RADAR_R * frac * Math.sin(p.rad)).toFixed(2);
+    }).join(' ');
+  };
+
+  // 参考环：40 / 60 / 80 / 100 分
+  [0.4, 0.6, 0.8, 1].forEach(function (f) {
+    svg.append(svgEl('polygon', {
+      class: 'radar-grid', points: ring(f),
+      'stroke-opacity': f === 1 ? 0.28 : 0.12,
+    }));
+  });
+
+  // 轴线
+  pts.forEach(function (p) {
+    svg.append(svgEl('line', {
+      class: 'radar-axis', x1: 50, y1: 50,
+      x2: (50 + RADAR_R * Math.cos(p.rad)).toFixed(2),
+      y2: (50 + RADAR_R * Math.sin(p.rad)).toFixed(2),
+    }));
+  });
+
+  svg.append(svgEl('polygon', {
+    class: 'radar-area',
+    points: pts.map(function (p) { return p.x.toFixed(2) + ',' + p.y.toFixed(2); }).join(' '),
+  }));
+
+  pts.forEach(function (p) {
+    svg.append(svgEl('circle', { class: 'radar-dot', cx: p.x, cy: p.y, r: 1.5 }));
+
+    // 标签推到轴外侧；左右两侧改变锚点，避免压住图形
+    const lr = RADAR_R + 12;
+    const lx = 50 + lr * Math.cos(p.rad);
+    const ly = 50 + lr * Math.sin(p.rad);
+    const anchor = Math.abs(Math.cos(p.rad)) < 0.25
+      ? 'middle' : (Math.cos(p.rad) > 0 ? 'start' : 'end');
+
+    const t = svgEl('text', { class: 'radar-label', x: lx, y: ly - 2.2,
+                              'text-anchor': anchor });
+    t.textContent = p.name;
+    svg.append(t);
+
+    const s = svgEl('text', { class: 'radar-score', x: lx, y: ly + 3.4,
+                              'text-anchor': anchor });
+    s.textContent = p.score;
+    svg.append(s);
+  });
+
+  // 总述里的 **强调** 转成金色
+  $('#score-lead').innerHTML = String(data['总述'] || '')
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/\*\*(.+?)\*\*/g, '<b>$1</b>');
+  $('#score-note').textContent = data['说明'] || '';
+
+  const box = $('#score-list');
+  box.innerHTML = '';
+  dims.forEach(function (name) {
+    const item = data['维度'][name];
+    const d = el('details', 'score-item');
+    // 只默认展开最弱一项：那正是用户最想追问的地方
+    if (name === data['最弱']) d.open = true;
+
+    const sum = el('summary');
+    sum.append(el('span', 'si-name', name));
+    sum.append(el('span', 'si-band', item['评级']));
+    sum.append(el('span', 'si-score', String(item['分数'])));
+    d.append(sum);
+
+    const ul = el('ul');
+    item['依据'].forEach(function (w) { ul.append(el('li', null, w)); });
+    d.append(ul);
+    box.append(d);
+  });
 }
 
 function renderMeta(chart) {

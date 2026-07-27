@@ -457,6 +457,147 @@ input:focus, select:focus {
   box-shadow: 0 0 0 3px rgba(205,163,73,.10);
 }
 
+/* ── 出生地：伪装成输入框的按钮 + 底部选择器 ───────────────── */
+
+.place-field {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: .5rem;
+  padding: .65rem .75rem;
+  background: rgba(0,0,0,.28);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  color: var(--text);
+  font-family: inherit;
+  font-size: .95rem;
+  min-height: 46px;
+  cursor: pointer;
+  text-align: left;
+  transition: border-color .25s, box-shadow .25s;
+}
+.place-field:active { border-color: var(--gold-dim); }
+.place-field i { font-style: normal; color: var(--faint); flex: none; }
+
+/* 打开选择器时锁住背景滚动。注意基础规则里 body 是 overflow-x: clip，
+   这里要连 x 轴一起覆盖，否则两条规则冲突。 */
+body.sheet-open { overflow: hidden; }
+
+.sheet { position: fixed; inset: 0; z-index: 80; }
+
+.sheet-mask {
+  position: absolute;
+  inset: 0;
+  background: rgba(4,6,10,.72);
+  backdrop-filter: blur(3px);
+}
+
+.sheet-body {
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  max-height: 82vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border-top: 1px solid var(--line-warm);
+  border-radius: 18px 18px 0 0;
+  padding-bottom: env(safe-area-inset-bottom);
+  animation: sheet-up .32s var(--ease);
+}
+@keyframes sheet-up { from { transform: translateY(100%); } to { transform: none; } }
+
+.sheet-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1rem 1.1rem .7rem;
+}
+.sheet-head b {
+  font-family: var(--serif);
+  font-size: 1rem;
+  letter-spacing: .14em;
+  color: var(--gold);
+  font-weight: 600;
+}
+.sheet-x {
+  background: none;
+  border: none;
+  color: var(--muted);
+  font-size: 1.05rem;
+  cursor: pointer;
+  padding: .2rem .4rem;
+  line-height: 1;
+}
+
+.sheet-search { padding: 0 1.1rem .7rem; }
+.sheet-search input {
+  width: 100%;
+  padding: .6rem .75rem;
+  background: rgba(0,0,0,.32);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  color: var(--text);
+  font-family: inherit;
+  /* 低于 16px 时 iOS 会自动放大页面，务必保持 */
+  font-size: 16px;
+  min-height: 44px;
+}
+.sheet-search input:focus {
+  outline: none;
+  border-color: var(--gold-dim);
+}
+
+.sheet-list {
+  flex: 1;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;   /* 滚到底不带动背景 */
+  padding: 0 .6rem .4rem;
+}
+
+.sheet-group {
+  font-size: .7rem;
+  color: var(--faint);
+  letter-spacing: .16em;
+  padding: .8rem .5rem .35rem;
+}
+
+.place-row {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  border-radius: 9px;
+  color: var(--text);
+  font-family: inherit;
+  font-size: .93rem;
+  padding: .68rem .5rem;
+  min-height: 44px;
+  cursor: pointer;
+}
+.place-row:active { background: rgba(205,163,73,.12); }
+.place-row.on { color: var(--gold-lit); background: rgba(205,163,73,.09); }
+.place-row.on::after { content: " ✓"; color: var(--gold); }
+
+.sheet-empty {
+  font-size: .84rem;
+  color: var(--muted);
+  line-height: 1.9;
+  padding: 1.4rem .8rem;
+  margin: 0;
+}
+
+.sheet-foot {
+  font-size: .72rem;
+  color: var(--faint);
+  line-height: 1.8;
+  margin: 0;
+  padding: .7rem 1.1rem 1rem;
+  border-top: 1px solid var(--line);
+}
+
 .advanced { margin: .4rem 0 1.2rem; }
 
 .advanced summary {
@@ -656,6 +797,99 @@ input:focus, select:focus {
 .gz.e-土 { text-shadow: 0 0 18px rgba(200,154,91,.35); }
 .gz.e-金 { text-shadow: 0 0 18px rgba(220,214,198,.30); }
 .gz.e-水 { text-shadow: 0 0 18px rgba(95,151,196,.35); }
+
+/* ── 五维评分 ─────────────────────────────────────────── */
+
+.radar { display: block; width: 100%; max-width: 330px; margin: 0 auto .3rem; }
+
+.radar-grid { fill: none; stroke: var(--gold); stroke-width: .4; }
+.radar-axis { stroke: rgba(139,133,120,.16); stroke-width: .3; }
+.radar-area {
+  fill: rgba(205,163,73,.16);
+  stroke: var(--gold);
+  stroke-width: .9;
+  stroke-linejoin: round;
+}
+.radar-dot { fill: var(--gold-lit); }
+.radar-label {
+  font-size: 4.4px; fill: var(--muted);
+  dominant-baseline: central; letter-spacing: .04em;
+}
+.radar-score {
+  font-family: var(--serif); font-size: 5.4px; font-weight: 600;
+  fill: var(--gold-lit); dominant-baseline: central;
+}
+
+.score-lead {
+  font-size: .89rem;
+  line-height: 1.95;
+  margin: .5rem 0 1rem;
+  color: var(--text);
+}
+.score-lead b { color: var(--gold-lit); font-weight: 600; }
+
+.score-list { display: grid; gap: .5rem; }
+
+.score-item {
+  background: rgba(0,0,0,.22);
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  overflow: hidden;
+}
+.score-item summary {
+  display: flex;
+  align-items: center;
+  gap: .6rem;
+  padding: .68rem .85rem;
+  cursor: pointer;
+  list-style: none;
+  min-height: 44px;
+}
+.score-item summary::-webkit-details-marker { display: none; }
+.score-item[open] summary { border-bottom: 1px solid var(--line); }
+
+.si-name {
+  font-family: var(--serif);
+  font-size: .95rem;
+  letter-spacing: .08em;
+  flex: 1;
+}
+.si-band {
+  font-size: .7rem;
+  color: var(--muted);
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  padding: .1rem .5rem;
+  flex: none;
+}
+.si-score {
+  font-family: var(--serif);
+  font-size: 1.15rem;
+  font-weight: 600;
+  color: var(--gold-lit);
+  flex: none;
+  min-width: 2rem;
+  text-align: right;
+}
+
+.score-item ul {
+  margin: 0;
+  padding: .7rem .95rem .8rem 2rem;
+  font-size: .85rem;
+  line-height: 1.9;
+  color: var(--muted);
+}
+.score-item li { margin-bottom: .35rem; }
+.score-item li:last-child { margin-bottom: 0; }
+
+.score-note {
+  font-size: .72rem;
+  color: var(--faint);
+  line-height: 1.8;
+  margin: .9rem 0 0;
+  padding-top: .8rem;
+  border-top: 1px solid var(--line);
+}
 
 /* ── 五行生克图 ───────────────────────────────────────── */
 

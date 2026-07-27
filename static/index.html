@@ -243,17 +243,18 @@
           <option value="female">女</option>
         </select>
       </label>
-      <label class="field">
-        <span>出生省份 / 地区</span>
-        <select name="province" id="province-select"></select>
-      </label>
-    </div>
-
-    <div class="field-row">
-      <label class="field">
-        <span>出生城市</span>
-        <select name="city" id="city-select"></select>
-      </label>
+      <!-- 出生地不用原生 select：微信内置浏览器对长列表下拉有渲染问题，
+           而这里恰好卡在唯一的转化路径上。改成可搜索的底部选择器，
+           顺带把「先选省再选市」压成一步——用户知道「苏州」，
+           未必要先想起它属江苏。 -->
+      <div class="field">
+        <span>出生地</span>
+        <button type="button" class="place-field" id="place-btn"
+                aria-haspopup="dialog">
+          <span id="place-label">上海</span>
+          <i aria-hidden="true">▾</i>
+        </button>
+      </div>
     </div>
 
     <details class="advanced">
@@ -331,6 +332,17 @@
     </div>
   </div>
 
+  <!-- 五维评分。刻意不给「命格总分」——把一生压成一个数字既是虚假的精确，
+       也真的会伤人。分维度看，每张盘都有强项，弱项才好谈怎么补。 -->
+  <div class="panel">
+    <h2>五维评分</h2>
+    <svg class="radar" id="radar" viewBox="-16 -14 132 130" role="img"
+         aria-label="命盘五维评分雷达图"></svg>
+    <p class="score-lead" id="score-lead"></p>
+    <div class="score-list" id="score-list"></div>
+    <p class="score-note" id="score-note"></p>
+  </div>
+
   <div class="panel">
     <h2>五行生克</h2>
     <!-- viewBox 向外留白：百分比标签落在节点外侧，0 0 100 100 会把它们裁掉 -->
@@ -386,6 +398,28 @@
   </div>
 
   <div class="toast" id="toast" hidden></div>
+
+<!-- 出生地选择器。放在 #result 之外、body 末尾附近，避免被结果区的
+     隐藏逻辑连带藏掉。 -->
+<div class="sheet" id="place-sheet" hidden role="dialog" aria-modal="true"
+     aria-label="选择出生地">
+  <div class="sheet-mask" data-close></div>
+  <div class="sheet-body">
+    <div class="sheet-head">
+      <b>选择出生地</b>
+      <button type="button" class="sheet-x" data-close aria-label="关闭">✕</button>
+    </div>
+    <div class="sheet-search">
+      <input type="search" id="place-search" autocomplete="off"
+             placeholder="搜城市或省份，如 苏州、江苏、乌鲁木齐">
+    </div>
+    <div class="sheet-list" id="place-list"></div>
+    <p class="sheet-foot">
+      经度只影响真太阳时校正。省内差异通常不足以改变时辰，
+      找不到你的城市就选同省最近的一个。
+    </p>
+  </div>
+</div>
 
 </section>
 
