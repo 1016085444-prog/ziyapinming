@@ -1295,6 +1295,25 @@ footer {
   .hero-title { font-size: clamp(3.2rem, 5.6vw, 4.6rem); }
   .hero-cta { max-width: 27rem; }
   .method-list p { padding-left: 2.1rem; }
+
+  /* 底部抽屉是移动端范式。宽屏上贴着底边拉满 1280px 又丑又难点，
+     改成居中对话框。 */
+  .sheet-body {
+    left: 50%;
+    right: auto;
+    bottom: auto;
+    top: 50%;
+    width: min(30rem, calc(100vw - 3rem));
+    max-height: min(34rem, 84vh);
+    transform: translate(-50%, -50%);
+    border: 1px solid var(--line-warm);
+    border-radius: 16px;
+    animation: sheet-pop .28s var(--ease);
+  }
+  @keyframes sheet-pop {
+    from { opacity: 0; transform: translate(-50%, -46%) scale(.97); }
+    to   { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+  }
 }
 
 /* 尊重系统偏好：关掉一切位移与自转，只留不透明度 */

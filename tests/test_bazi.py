@@ -374,3 +374,35 @@ class TestInputTimePreserved(unittest.TestCase):
         self.assertFalse(c.dst_adjusted)
         d = c.to_dict()["出生"]
         self.assertEqual(d["登记时刻"], d["标准时"])
+
+
+class TestOverlayPlacement(unittest.TestCase):
+    """覆盖层（出生地选择器、提示条）必须挂在 body 下。
+
+    曾经把选择器放进 <section id="result">，而结果区在排盘前是
+    display:none —— 选择器渲染成 0×0，出生地根本选不了，所有人
+    都在用默认城市。非东部沿海的用户因此整个时柱是错的。
+    祖先被隐藏时，元素自身 hidden=false 也救不回来。
+    """
+
+    def _html(self):
+        from pathlib import Path
+        return Path(__file__).resolve().parent.parent.joinpath(
+            "static", "index.html").read_text(encoding="utf-8")
+
+    def test_overlays_outside_result_section(self):
+        html = self._html()
+        result_start = html.index('<section id="result"')
+        result_end = html.index("</section>", result_start)
+        inside = html[result_start:result_end]
+        for overlay in ('id="place-sheet"', 'id="toast"'):
+            self.assertNotIn(overlay, inside,
+                             overlay + " 落在了会被隐藏的 #result 里")
+            self.assertIn(overlay, html, overlay + " 不见了")
+
+    def test_overlays_come_after_main(self):
+        html = self._html()
+        main_end = html.index("</main>")
+        for overlay in ('id="place-sheet"', 'id="toast"'):
+            self.assertGreater(html.index(overlay), main_end,
+                               overlay + " 应放在 </main> 之后")

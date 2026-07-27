@@ -416,8 +416,21 @@
     </div>
   </div>
 
-  <div class="toast" id="toast" hidden></div>
 
+
+</section>
+
+<footer>
+  <p>命理是一套传统的解释框架，讲的是倾向与节奏，不是既定的结局。
+     本站内容不构成医疗、法律或投资建议。</p>
+</footer>
+
+</main>
+
+<!-- 覆盖层：必须是 body 的直接子元素。
+     曾经把它们放在 <section id="result"> 里，而结果区在排盘前是
+     display:none —— 选择器于是渲染成 0×0，出生地根本选不了，
+     所有人都在用默认城市。祖先被隐藏时，自身 hidden=false 也没用。 -->
 <!-- 出生地选择器。放在 #result 之外、body 末尾附近，避免被结果区的
      隐藏逻辑连带藏掉。 -->
 <div class="sheet" id="place-sheet" hidden role="dialog" aria-modal="true"
@@ -440,14 +453,7 @@
   </div>
 </div>
 
-</section>
-
-<footer>
-  <p>命理是一套传统的解释框架，讲的是倾向与节奏，不是既定的结局。
-     本站内容不构成医疗、法律或投资建议。</p>
-</footer>
-
-</main>
+<div class="toast" id="toast" hidden></div>
 
 <script src="/static/app.js?v=__V__"></script>
 </body>
