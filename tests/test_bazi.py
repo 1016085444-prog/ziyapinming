@@ -358,9 +358,43 @@ class TestScoringCalibration(unittest.TestCase):
         for d, rate in rates.items():
             self.assertGreater(rate, 0.5, "{} 从不出低分，维度失效".format(d))
             self.assertLess(rate, 20.0, "{} 低分率过高（{:.1f}%）".format(d, rate))
-        self.assertLess(max(rates.values()) - min(rates.values()), 18.0,
+        self.assertLess(max(rates.values()) - min(rates.values()), 10.0,
                         "各维低分率离散过大：{}".format(
                             {k: round(v, 1) for k, v in rates.items()}))
+
+    def test_dimensions_share_one_scale(self):
+        """五维必须同尺度，否则雷达图会骗人。
+
+        不归一时实测标准差从 9.3 到 14.2：人际拿 78 分比事业拿 78 分稀有
+        得多（离中位数 1.0 个标准差 vs 0.6 个），可这两个数字并排显示，
+        用户只会当成一回事。RAW_CALIBRATION 就是为消除这个差异而存在的，
+        任何规则权重改动后若忘了重测常量，这条会先报警。
+        """
+        import statistics as st
+        meds = {d: st.median(col) for d, col in self.cols.items()}
+        sds = {d: st.pstdev(col) for d, col in self.cols.items()}
+        self.assertLess(max(meds.values()) - min(meds.values()), 4.0,
+                        "各维中位数未对齐：{}".format(meds))
+        self.assertLess(max(sds.values()) - min(sds.values()), 2.5,
+                        "各维散布未对齐：{}".format(
+                            {k: round(v, 1) for k, v in sds.items()}))
+
+    def test_distributions_stay_symmetric(self):
+        """对称是要守住的性质——明显偏斜通常意味着规则有 bug，
+        例如同一个信号既取消加分又施加减分（曾让情感维度低分率高达 22.5%）。
+
+        刻意不检验正态：实测峰度为负（比正态平坦），而这对产品有利——
+        正态会把多数人堆在中间、削弱区分度。
+        """
+        import statistics as st
+        for d, col in self.cols.items():
+            m, s = st.fmean(col), st.pstdev(col)
+            if not s:
+                self.fail(d + " 全员同分")
+            skew = sum(((x - m) / s) ** 3 for x in col) / len(col)
+            self.assertLess(abs(skew), 0.6,
+                            "{} 分布明显偏斜（偏度 {:.2f}），"
+                            "检查是否有信号被重复计分".format(d, skew))
 
     def test_dimensions_are_not_redundant(self):
         """相关系数过高说明几个维度其实在测同一件事。"""
