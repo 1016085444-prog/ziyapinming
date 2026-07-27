@@ -15,7 +15,10 @@
 
 from __future__ import annotations
 
-from .analysis import day_master_strength, element_scores, ten_god_census
+from .analysis import (
+    day_master_strength, element_scores, favorable_elements, pattern,
+    ten_god_census,
+)
 from .ganzhi import (
     BRANCHES, PUNISH_GROUPS, PUNISH_PAIR, SELF_PUNISH,
     SIX_CLASH, SIX_HARM, SIX_HARMONY, THREE_HARMONY, THREE_MEETING,
@@ -25,6 +28,14 @@ __all__ = ["score_chart", "DIMENSIONS"]
 
 BASE = 58.0
 FLOOR, CEIL = 38, 96
+
+# 每一维的减分总额上限。
+#
+# 不封顶时同一维能叠掉近 30 分，直接把人按到底部——而那些减分项在命理上
+# 往往同源（日支冲、带刑害、配偶宫空亡，说的都是「配偶宫不稳」这一件事），
+# 逐条累加等于同一件事罚三次。封顶后依据仍逐条列出，不掩盖任何一条，
+# 只是不让它们在分数上重复计。
+PENALTY_CAP = 20
 
 DIMENSIONS = ("事业格局", "财富机遇", "人际助力", "健康根基", "情感缘分")
 
@@ -47,15 +58,40 @@ ADVICE = {
 }
 
 
+# 吉格（月令成格且格神得用时，路径比杂格清晰）
+BENIGN_PATTERNS = ("正官格", "正印格", "正财格", "食神格", "建禄格")
+# 需制化的格，无制则主波折
+HARSH_PATTERNS = ("七杀格", "伤官格", "偏印格", "羊刃格")
+
+
 def _bell(x, center, width):
     """离 center 越近越接近 1，超出 width 归零。用来表达「适中最好」。
 
     命理里很多东西不是越多越好——官杀太旺压身、财太旺身弱担不住，
     所以用钟形而不是线性。
+
+    中心值对着 600 张随机盘的真实分布校过：官杀/财/印/食伤的力量占比
+    中位数约 0.145，比劫因含日主自身而偏高（约 0.238）。中心取在中位数
+    之上，表示「略多于常见水平为佳」，而不是「跟大多数人一样就好」。
     """
     if width <= 0:
         return 0.0
     return max(0.0, 1.0 - abs(x - center) / width)
+
+
+def _favor_shift(element, fav, span):
+    """该五行是喜用还是忌神，折算成分数增减。
+
+    这是子平法的核心，也是只看「力量大小」必然判错的地方：同一个十神
+    是吉是凶，取决于它是喜神还是忌神。财旺，对身强是能担财，对身弱是
+    破财；官杀旺，对身强是有担当，对身弱是压力压垮人。只数力量不辨喜忌，
+    这两种截然相反的局会被判成同一个分数。
+    """
+    if element in fav["喜用"]:
+        return span
+    if element in fav["忌神"]:
+        return -span
+    return 0.0
 
 
 def _clamp(v):
@@ -150,6 +186,8 @@ def score_chart(chart):
     god = lambda name: census.get(name, 0.0)      # noqa: E731
     shensha = chart.to_dict()["神煞"]
     day_rel = _day_branch_relations(chart)
+    fav = favorable_elements(chart)
+    pat = pattern(chart)["格局"]
 
     result = {}
 
@@ -161,6 +199,31 @@ def score_chart(chart):
         why.append("官杀力量适中，事业上有明确的方向感与约束力")
     elif r["官杀"] < 0.07:
         why.append("官杀偏轻，需要自己给自己立规矩，不宜久处无人管束的环境")
+
+    penalty = 0
+
+    # 官杀是喜是忌，决定这份约束是助力还是压力——同样的官杀力量，
+    # 身强者得之为担当，身弱者得之为重压
+    shift = _favor_shift(roles["官杀"], fav, 7)
+    if shift > 0:
+        v += shift
+        why.append("官杀正为喜用，责任与权力落到你身上是加分项")
+    elif shift < 0:
+        penalty += -shift
+        why.append("官杀属忌神，头衔与责任若来得太快反成负担，宜量力承接")
+
+    # 月令成格则路径清晰，杂格则方向易散。
+    # 但正官格逢七杀即「官杀混杂」，格已不清——此时再给「路径清晰」的加分，
+    # 会和下面「正官七杀并见，路径容易分岔」那条自相矛盾。
+    if pat in BENIGN_PATTERNS:
+        if pat == "正官格" and god("七杀") > 0.5:
+            why.append("月令虽属正官格，然七杀并透、格局不清，方向要靠自己厘定")
+        else:
+            v += 6
+            why.append("月令成{}，本业路径比多数人清晰".format(pat))
+    elif pat in HARSH_PATTERNS:
+        penalty += 4
+        why.append("{}需有制化才见其力，顺境靠积累，逆境忌冒进".format(pat))
 
     # 同样做成互斥全覆盖，避免中间区间一句话都说不出来
     carry = 12 * _bell(balance, 0.52, 0.16)
@@ -177,14 +240,14 @@ def score_chart(chart):
         why.append("官印相生，有名分也有支撑，是较清晰的上升结构")
 
     if god("正官") > 0.5 and god("七杀") > 0.5:
-        v -= 8
+        penalty += 8
         why.append("正官七杀并见，路径容易分岔，宜早定一门深入")
 
     if r["官杀"] > 0.34 and balance < 0.44:
-        v -= 10
+        penalty += 10
         why.append("官杀旺而日主偏弱，压力大于助力，忌硬扛")
 
-    result["事业格局"] = (v, why)
+    result["事业格局"] = (v - min(PENALTY_CAP, penalty), why)
 
     # ── 财富机遇 ────────────────────────────────────────────
     v, why = BASE, []
@@ -208,38 +271,62 @@ def score_chart(chart):
     else:
         why.append("日主偏弱而财不轻，宜先把自己这一头养厚，再谈放大")
 
+    penalty = 0
+
+    # 财是喜是忌，决定同样的财星力量是能担还是被压
+    shift = _favor_shift(roles["财"], fav, 7)
+    if shift > 0:
+        v += shift
+        why.append("财星正为喜用，赚到的守得住，宜早立主业")
+    elif shift < 0:
+        penalty += -shift
+        why.append("财星属忌神，进项越猛越要留出余地，忌加杠杆放大")
+
     if r["食伤"] > 0.08 and r["财"] > 0.08:
         v += 9
         why.append("食伤生财，靠本事与创意换钱，比坐等机会有力")
 
     if r["财"] > 0.28 and balance < 0.42:
-        v -= 12
+        penalty += 12
         why.append("财旺而身弱，机会看得见抓不住，宜先固本再图大")
 
     if r["比劫"] > 0.30 and r["财"] < 0.12:
-        v -= 8
+        penalty += 8
         why.append("比劫重而财轻，合伙与借贷需格外谨慎")
 
-    result["财富机遇"] = (v, why)
+    result["财富机遇"] = (v - min(PENALTY_CAP, penalty), why)
 
     # ── 人际助力 ────────────────────────────────────────────
-    v, why = BASE - 2, []
+    # 这一维曾经形同虚设：600 张样本里最低 52 分、标准差仅 7.2，人人中上。
+    # 原因有二——比劫钟形中心恰好压在中位数上（几乎人人拿满），
+    # 且加分上限远高于减分上限。下面把中心移开、把上下限拉平。
+    v, why = BASE - 4, []
     v += 12 * _bell(r["印"], 0.18, 0.17)
     if r["印"] > 0.12:
         why.append("印星有力，长辈与师长一路都有照应")
 
-    v += 8 * _bell(r["比劫"], 0.22, 0.19)
-    if r["比劫"] > 0.34:
+    v += 9 * _bell(r["比劫"], 0.26, 0.16)
+    if r["比劫"] > 0.38:
         why.append("比劫偏重，平辈助力与竞争同时存在，界限要谈清楚")
-    elif r["比劫"] < 0.10 and r["印"] < 0.12:
+    elif r["比劫"] < 0.12 and r["印"] < 0.12:
         why.append("印比俱轻，凡事多靠自己张罗，早年少现成的依靠")
+
+    penalty = 0
+
+    # 印为喜用则长辈之力真能落到实处，为忌则易受人情牵绊
+    shift = _favor_shift(roles["印"], fav, 5)
+    if shift > 0:
+        v += shift
+    elif shift < 0:
+        penalty += -shift
+        why.append("印星属忌神，他人的好意有时反成牵绊，边界要自己守")
 
     lucky = 0
     for name, w in AUSPICIOUS.items():
         if name in shensha:
             lucky += w
     if lucky:
-        v += min(14, lucky)
+        v += min(10, lucky)
         hit = [n for n in AUSPICIOUS if n in shensha]
         why.append("命带" + "、".join(hit) + "，关键处常有人拉一把")
 
@@ -250,10 +337,10 @@ def score_chart(chart):
 
     c = _clash_count(chart)
     if c:
-        v -= min(12, c * 3)
+        penalty += min(16, c * 4)
         why.append("原局有{}处刑冲害，关系上易起波折，忌意气用事".format(c))
 
-    result["人际助力"] = (v, why)
+    result["人际助力"] = (v - min(PENALTY_CAP, penalty), why)
 
     # ── 健康根基 ────────────────────────────────────────────
     v, why = BASE + 2, []
@@ -261,7 +348,10 @@ def score_chart(chart):
     props = [scores[e] / total for e in scores]
     mean = sum(props) / len(props)
     spread = (sum((p - mean) ** 2 for p in props) / len(props)) ** 0.5
-    v += 18 * max(0.0, 1 - spread / 0.17)
+    penalty = 0
+    # 权重从 18 提到 22：这一维原先标准差只有 8.9，是五维里最窄的，
+    # 而五行是否偏枯恰恰是健康维度最有分辨力的信号，值得给足权重
+    v += 22 * max(0.0, 1 - spread / 0.17)
     if spread < 0.07:
         why.append("五行分布均衡，身体底子偏稳")
     elif spread > 0.14:
@@ -278,24 +368,28 @@ def score_chart(chart):
 
     missing = [e for e in scores if scores[e] / total < 0.05]
     if missing:
-        v -= min(14, 7 * len(missing))
+        penalty += min(14, 7 * len(missing))
         why.append("五行缺" + "、".join(missing) + "，对应脏腑与情志需多留意")
 
     if day_rel["冲"]:
-        v -= 8
+        penalty += 8
         why.append("日支逢冲（" + "、".join(day_rel["冲"]) + "），作息与情绪易被打断")
 
     if chart.month.branch in "亥子丑" and scores["火"] / total < 0.08:
-        v -= 6
+        penalty += 6
         why.append("生于冬月而火气不足，畏寒、循环偏弱")
     elif chart.month.branch in "巳午未" and scores["水"] / total < 0.08:
-        v -= 6
+        penalty += 6
         why.append("生于夏月而水气不足，易燥易耗，注意补水与睡眠")
 
-    result["健康根基"] = (v, why)
+    result["健康根基"] = (v - min(PENALTY_CAP, penalty), why)
 
     # ── 情感缘分 ────────────────────────────────────────────
-    v, why = BASE, []
+    # 起点比其他维度高 6 分，是为了抵掉一处重复计分：样本里 54.5% 的盘
+    # 日支带刑冲害，这些盘原先既拿不到「宫位安稳」的加分、又要再吃一次
+    # 减分，同一个信号计了两次，导致这一维低分率是其他维度的三四倍。
+    # 现在把安稳视作常态（加分调小），刑冲只从减分一侧生效。
+    v, why = BASE + 6, []
     male = chart.gender == "male"
     # 男以财为配偶星，女以官杀为配偶星
     spouse_star = r["财"] if male else r["官杀"]
@@ -306,39 +400,52 @@ def score_chart(chart):
     elif spouse_star < 0.07:
         why.append("配偶星偏轻，缘分来得晚一些，宜主动而非等待")
 
-    if not (day_rel["冲"] or day_rel["刑"] or day_rel["害"]):
-        v += 10
-        why.append("配偶宫（日支）安稳未受刑冲，家宅少是非")
+    penalty = 0
+
+    # 配偶星是喜是忌，比它力量多少更能说明关系带来的是滋养还是消耗
+    shift = _favor_shift(roles["财"] if male else roles["官杀"], fav, 6)
+    if shift > 0:
+        v += shift
+        why.append("配偶星正为喜用，伴侣多能带来实际的助益")
+    elif shift < 0:
+        penalty += -shift
+        why.append("配偶星属忌神，亲密关系里容易过度付出，需留出自己的空间")
+
     if day_rel["合"]:
         v += 6
         why.append("日支逢合（" + "、".join(day_rel["合"]) + "），亲密关系有黏合力")
+
+    if not (day_rel["冲"] or day_rel["刑"] or day_rel["害"]):
+        v += 4
+        why.append("配偶宫（日支）安稳未受刑冲，家宅少是非")
     if day_rel["冲"]:
-        v -= 12
+        penalty += 12
         why.append("日支逢冲（" + "、".join(day_rel["冲"]) + "），聚少离多或聚散反复")
     if day_rel["刑"] or day_rel["害"]:
-        v -= 7
+        penalty += 7
         why.append("日支带刑害，相处中细节摩擦偏多")
 
     if male and god("正财") > 0.5 and god("偏财") > 0.5:
-        v -= 8
+        penalty += 8
         why.append("正偏财并见，感情选择多，专一需要刻意为之")
     if (not male) and god("正官") > 0.5 and god("七杀") > 0.5:
-        v -= 8
+        penalty += 8
         why.append("官杀混杂，容易遇到反差很大的两类人，宜看长期不看一时")
 
     if (not male) and r["食伤"] > 0.30 and r["官杀"] < 0.10:
-        v -= 6
+        penalty += 6
         why.append("食伤旺而官星弱，主见强不易将就，宜找欣赏你锋芒的人")
+
+    from .ganzhi import empty_branches
+    if chart.day.branch in empty_branches(chart.day.stem, chart.day.branch):
+        penalty += 5
+        why.append("配偶宫落空亡，感情上易有「差一点」的遗憾，宜晚婚")
 
     if "桃花" in shensha:
         v += 4
         why.append("命带桃花，异性缘不缺，选择反而更需要标准")
 
-    from .ganzhi import empty_branches
-    if chart.day.branch in empty_branches(chart.day.stem, chart.day.branch):
-        v -= 5
-
-    result["情感缘分"] = (v, why)
+    result["情感缘分"] = (v - min(PENALTY_CAP, penalty), why)
 
     # ── 汇总 ────────────────────────────────────────────────
     final = {}

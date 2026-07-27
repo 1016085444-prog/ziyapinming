@@ -308,6 +308,90 @@ class TestScoring(unittest.TestCase):
                                 r["维度"][r["最弱"]]["分数"])
 
 
+class TestScoringCalibration(unittest.TestCase):
+    """评分校准。
+
+    这套阈值是拿 600 张随机盘实测调出来的，不是拍脑袋定的，所以必须有
+    测试锁住——否则日后动一条规则就会悄悄跑偏，而跑偏在单张盘上看不出来。
+
+    曾经踩过的两个坑，正是这几条断言要防的：
+      * 人际助力全员中上（标准差 7.2、低分率 0%），维度形同虚设；
+      * 情感缘分低分率 22.5%，是其他维度的三四倍，因为「配偶宫无刑冲」
+        的加分与刑冲减分是同一信号计了两次。
+    """
+
+    SAMPLE = 240
+
+    @classmethod
+    def setUpClass(cls):
+        import random
+        from bazi.scoring import score_chart, DIMENSIONS
+        rng = random.Random(20260727)      # 固定种子，结果可复现
+        cls.cols = {d: [] for d in DIMENSIONS}
+        for _ in range(cls.SAMPLE):
+            c = build_chart(
+                rng.randint(1955, 2010), rng.randint(1, 12), rng.randint(1, 28),
+                rng.randint(0, 23), rng.choice([0, 15, 30, 45]),
+                gender=rng.choice(["male", "female"]),
+                longitude=rng.choice([116.41, 121.47, 113.26, 104.07, 87.62]),
+            )
+            r = score_chart(c)
+            for d in DIMENSIONS:
+                cls.cols[d].append(r["维度"][d]["分数"])
+
+    def test_every_dimension_discriminates(self):
+        """标准差过小说明这一维在给所有人打同样的分，等于没有这一维。"""
+        import statistics as st
+        for d, col in self.cols.items():
+            self.assertGreater(st.pstdev(col), 7.0,
+                               "{} 区分度不足（标准差 {:.1f}）".format(
+                                   d, st.pstdev(col)))
+
+    def test_low_score_rate_is_balanced(self):
+        """没有哪一维该系统性地当「坏消息担当」。
+
+        全为高分则维度无意义；某一维低分率畸高，用户会觉得被针对。
+        """
+        rates = {}
+        for d, col in self.cols.items():
+            rates[d] = 100.0 * sum(1 for x in col if x < 52) / len(col)
+        for d, rate in rates.items():
+            self.assertGreater(rate, 0.5, "{} 从不出低分，维度失效".format(d))
+            self.assertLess(rate, 20.0, "{} 低分率过高（{:.1f}%）".format(d, rate))
+        self.assertLess(max(rates.values()) - min(rates.values()), 18.0,
+                        "各维低分率离散过大：{}".format(
+                            {k: round(v, 1) for k, v in rates.items()}))
+
+    def test_dimensions_are_not_redundant(self):
+        """相关系数过高说明几个维度其实在测同一件事。"""
+        import math
+        from bazi.scoring import DIMENSIONS
+
+        def corr(a, b):
+            ma, mb = sum(a) / len(a), sum(b) / len(b)
+            va = sum((x - ma) ** 2 for x in a)
+            vb = sum((x - mb) ** 2 for x in b)
+            if not va or not vb:
+                return 0.0
+            return sum((x - ma) * (y - mb)
+                       for x, y in zip(a, b)) / math.sqrt(va * vb)
+
+        for i, x in enumerate(DIMENSIONS):
+            for y in DIMENSIONS[i + 1:]:
+                c = abs(corr(self.cols[x], self.cols[y]))
+                self.assertLess(c, 0.7,
+                                "{} 与 {} 高度相关（{:.2f}）".format(x, y, c))
+
+    def test_rarely_pinned_at_bounds(self):
+        """大量触顶触底意味着区间设计有问题，分数会失去分辨力。"""
+        from bazi.scoring import FLOOR, CEIL
+        for d, col in self.cols.items():
+            for bound, label in ((FLOOR, "触底"), (CEIL, "触顶")):
+                rate = 100.0 * col.count(bound) / len(col)
+                self.assertLess(rate, 5.0,
+                                "{} {}比例过高（{:.1f}%）".format(d, label, rate))
+
+
 class TestInquiry(unittest.TestCase):
     """待定论。这是转化引擎，几条硬约束不能被后续改动破坏。"""
 
