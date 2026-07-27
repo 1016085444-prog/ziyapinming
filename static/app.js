@@ -414,7 +414,7 @@ function render(data, placeName) {
   const b = chart['出生'];
   state.summary =
     '八字：' + bazi + '\n' +
-    '（' + b['性别'] + '，' + b['标准时'] +
+    '（' + b['性别'] + '，' + (b['登记时刻'] || b['标准时']) +
     (placeName ? ' 生于' + placeName : '') + '）';
 
   renderMeta(chart);
@@ -422,7 +422,104 @@ function render(data, placeName) {
   renderScores(data.scores);
   renderElements(data.analysis);
   renderLuck(chart, data.years);
+  renderYears(data.years);
   renderShensha(chart);
+  renderInquiry(data.inquiry);
+}
+
+/* 流年。今年单独放大，后两年压成小卡——注意力该给当下，
+   但把后两年摆出来能让人意识到「这是有时间性的东西」。 */
+function renderYears(years) {
+  const box = $('#years');
+  if (!box) return;
+  box.innerHTML = '';
+  if (!years || !years.length) return;
+
+  const cur = years[0];
+  const head = el('div', 'year-now');
+
+  const top = el('div', 'yn-top');
+  top.append(el('span', 'yn-year', cur['年份'] + ' 年'));
+  top.append(el('span', 'yn-gz', cur['流年干支']));
+  top.append(el('span', 'yn-god', cur['流年天干十神']));
+  head.append(top);
+
+  if (cur['流年主题']) head.append(el('p', 'yn-theme', cur['流年主题']));
+
+  const tone = cur['五行取向'];
+  const tag = el('span', 'yn-tone', tone);
+  if (tone.indexOf('契合') >= 0) tag.classList.add('good');
+  else if (tone.indexOf('忌') >= 0) tag.classList.add('warn');
+  const meta = el('div', 'yn-meta');
+  meta.append(tag);
+  meta.append(el('span', null, '所行大运 ' + cur['所行大运']));
+  meta.append(el('span', null, '虚岁 ' + cur['虚岁']));
+  head.append(meta);
+
+  // 刑冲合会是「今年被触动了什么」，用户最在意这块
+  const stirred = [];
+  ['大运引动', '流年引动'].forEach(function (k) {
+    const g = cur[k];
+    if (!g) return;
+    Object.keys(g).forEach(function (kind) {
+      if (kind === '说明') return;
+      g[kind].forEach(function (item) { stirred.push(item); });
+    });
+  });
+  if (stirred.length) {
+    const s = el('div', 'yn-stir');
+    s.append(el('span', 'yn-stir-label', '今年被引动'));
+    stirred.forEach(function (t) { s.append(el('span', 'tag warn', t)); });
+    head.append(s);
+  }
+  box.append(head);
+
+  const rest = el('div', 'year-rest');
+  years.slice(1).forEach(function (y) {
+    const c = el('div', 'year-mini');
+    c.append(el('div', 'ym-year', y['年份'] + ''));
+    c.append(el('div', 'ym-gz', y['流年干支']));
+    c.append(el('div', 'ym-god', y['流年天干十神']));
+    rest.append(c);
+  });
+  if (rest.children.length) box.append(rest);
+}
+
+/* 待定论。整条漏斗里唯一让用户想到「我的情况比较特殊」的地方。
+   点任意一条 = 把八字和这个问题一起复制好，直接就能发给命理师。 */
+function renderInquiry(items) {
+  const panel = $('#inquiry-panel');
+  const box = $('#inquiry-list');
+  if (!panel || !box) return;
+  box.innerHTML = '';
+  if (!items || !items.length) { panel.hidden = true; return; }
+  panel.hidden = false;
+
+  items.forEach(function (q) {
+    const card = el('div', 'inq');
+    card.append(el('div', 'inq-title', q['标题']));
+    card.append(el('p', 'inq-fact', q['事实']));
+    card.append(el('p', 'inq-fork', q['两可']));
+
+    const ask = el('button', 'inq-ask');
+    ask.type = 'button';
+    ask.append(el('span', 'inq-q', q['问题']));
+    ask.append(el('span', 'inq-go', '带着这个问题问 →'));
+    ask.addEventListener('click', function () { askQuestion(q['问法'] || q['问题']); });
+    card.append(ask);
+    box.append(card);
+  });
+}
+
+/* 把「八字 + 问题」整段复制好，用户加上微信直接粘贴就能发出第一条消息。
+   省掉「我该说什么」这一步——这一步的摩擦正是私域引流最常见的流失点。 */
+async function askQuestion(question) {
+  const msg = state.summary + '\n想问：' + question;
+  const ok = await copyText(msg);
+  showToast(ok ? '八字和问题已复制，加微信后直接粘贴发我'
+                : '复制失败，请截图本页发我');
+  // 无论复制成不成功都滚过去：复制失败时更需要把联系方式送到眼前
+  scrollToEl($('.wechat-card'), 90);
 }
 
 /* 五维雷达图。半径直接按分数比例走（分数区间 38–96，映射到 38%–96% 半径），
@@ -763,17 +860,9 @@ function renderShensha(chart) {
 /* 点问题标签 = 把「八字 + 问题」整段复制好。
    用户加上微信直接粘贴就能发出第一条消息，省掉「我该说什么」这一步，
    这一步的摩擦正是私域引流最常见的流失点。 */
-$('#suggestions').addEventListener('click', async (e) => {
+$('#suggestions').addEventListener('click', (e) => {
   const chip = e.target.closest('.chip');
-  if (!chip) return;
-
-  const msg = state.summary + '\n想问：' + chip.textContent;
-  const ok = await copyText(msg);
-  showToast(ok ? '八字和问题已复制，加微信后直接粘贴发我'
-                : '复制失败，请截图本页发我');
-  // 无论复制成不成功都滚过去：点标签的意图就是「我想问这个」，
-  // 复制失败时更需要把联系方式送到眼前，否则用户看着提示却找不到人。
-  scrollToEl($('.wechat-card'), 90);
+  if (chip) askQuestion(chip.textContent);
 });
 
 $('#copy-wx').addEventListener('click', async () => {

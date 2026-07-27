@@ -22,6 +22,7 @@ from pydantic import BaseModel, Field
 
 import config
 from bazi.analysis import analyze, year_outlook
+from bazi.inquiry import open_questions
 from bazi.scoring import score_chart
 from bazi.chart import build_chart
 
@@ -65,6 +66,7 @@ def api_chart(payload: BirthInput):
         "chart": chart.to_dict(),
         "analysis": analyze(chart),
         "scores": score_chart(chart),
+        "inquiry": open_questions(chart, this_year),
         "years": [
             year_outlook(chart, y)
             for y in (this_year, this_year + 1, this_year + 2)

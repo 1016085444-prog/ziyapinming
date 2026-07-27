@@ -151,7 +151,8 @@ class LuckPillar:
 
 @dataclass
 class Chart:
-    solar_time: datetime          # 出生地标准时（带时区）
+    solar_time: datetime          # 出生地标准时（夏令时已回退）
+    input_time: datetime          # 用户填的原始时刻，仅用于展示与核对
     true_solar_time: datetime     # 真太阳时
     gender: str                   # "male" / "female"
     longitude: float
@@ -221,6 +222,7 @@ class Chart:
         void = empty_branches(self.day.stem, self.day.branch)
         return {
             "出生": {
+                "登记时刻": self.input_time.strftime("%Y-%m-%d %H:%M"),
                 "标准时": self.solar_time.strftime("%Y-%m-%d %H:%M"),
                 "真太阳时": self.true_solar_time.strftime("%Y-%m-%d %H:%M"),
                 "性别": "男" if self.gender == "male" else "女",
@@ -325,6 +327,10 @@ def build_chart(
 
     tz = timezone(timedelta(hours=tz_offset))
     local_dt = datetime(year, month, day, hour, minute, tzinfo=tz)
+    # 留住用户填的原始时刻。下面的夏令时回退会就地改掉 local_dt，
+    # 而对外展示、以及转给命理师的消息都必须是用户填的那个时间——
+    # 否则对方拿回退后的时间去别处重排，若那边也做回退就会二次扣减。
+    input_dt = local_dt
 
     # 夏令时回退：把墙钟时间还原成标准时。必须在一切推算之前完成，
     # 否则年月日时四柱都可能跟着错。
@@ -367,6 +373,7 @@ def build_chart(
 
     chart = Chart(
         solar_time=local_dt,
+        input_time=input_dt,
         true_solar_time=reckon_dt,
         gender=gender,
         longitude=longitude,

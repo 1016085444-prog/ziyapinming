@@ -306,3 +306,71 @@ class TestScoring(unittest.TestCase):
         self.assertIn(r["最弱"], r["维度"])
         self.assertGreaterEqual(r["维度"][r["最强"]]["分数"],
                                 r["维度"][r["最弱"]]["分数"])
+
+
+class TestInquiry(unittest.TestCase):
+    """待定论。这是转化引擎，几条硬约束不能被后续改动破坏。"""
+
+    def _chart(self, **kw):
+        base = dict(year=1990, month=5, day=20, hour=10, minute=30,
+                    gender="female", longitude=121.47)
+        base.update(kw)
+        return build_chart(**base)
+
+    def test_never_empty(self):
+        """一条都问不出的盘 = 那个用户看完没有任何钩子，是转化漏洞。"""
+        from bazi.inquiry import open_questions
+        import random
+        random.seed(5)
+        for _ in range(120):
+            c = build_chart(
+                year=random.randint(1950, 2010), month=random.randint(1, 12),
+                day=random.randint(1, 28), hour=random.randint(0, 23),
+                gender=random.choice(["male", "female"]),
+                longitude=random.uniform(75, 135))
+            self.assertTrue(open_questions(c, 2026), "出现零钩子的盘")
+
+    def test_required_fields(self):
+        from bazi.inquiry import open_questions, MAX_QUESTIONS
+        qs = open_questions(self._chart(), 2026)
+        self.assertLessEqual(len(qs), MAX_QUESTIONS)
+        for q in qs:
+            for k in ("标题", "事实", "两可", "问题", "问法"):
+                self.assertIn(k, q)
+                self.assertTrue(q[k].strip(), k + " 为空")
+
+    def test_ask_is_first_person(self):
+        """「问法」是用户拿去问命理师的，必须第一人称；
+        用第二人称的「问题」会让粘贴过去的消息变成反问对方。"""
+        from bazi.inquiry import open_questions
+        import random
+        random.seed(9)
+        for _ in range(60):
+            c = build_chart(
+                year=random.randint(1950, 2010), month=random.randint(1, 12),
+                day=random.randint(1, 28), hour=random.randint(0, 23),
+                gender=random.choice(["male", "female"]),
+                longitude=random.uniform(75, 135))
+            for q in open_questions(c, 2026):
+                self.assertTrue(q["问法"].startswith("我"),
+                                "问法不是第一人称：" + q["问法"])
+                self.assertNotEqual(q["问法"], q["问题"])
+
+
+class TestInputTimePreserved(unittest.TestCase):
+    """夏令时回退会改掉参与推算的时刻，但展示与转给命理师的必须是
+    用户填的原始时间——否则对方拿回退后的时间去重排，若那边也做回退
+    就会二次扣减，排出另一张盘。"""
+
+    def test_input_time_survives_dst_rollback(self):
+        c = build_chart(1990, 6, 15, 10, 0, longitude=116.41)
+        self.assertTrue(c.dst_adjusted)
+        d = c.to_dict()["出生"]
+        self.assertEqual(d["登记时刻"], "1990-06-15 10:00")
+        self.assertEqual(d["标准时"], "1990-06-15 09:00")
+
+    def test_identical_when_no_dst(self):
+        c = build_chart(1995, 6, 15, 10, 0, longitude=116.41)
+        self.assertFalse(c.dst_adjusted)
+        d = c.to_dict()["出生"]
+        self.assertEqual(d["登记时刻"], d["标准时"])
