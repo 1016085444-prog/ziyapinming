@@ -13,12 +13,18 @@
 from __future__ import annotations
 
 import math
+import sys
 from pathlib import Path
 
 import segno
 from PIL import Image, ImageDraw, ImageFont
 
-URL = "https://ziya-pinming-287407-10-1458679509.sh.run.tcloudbase.com"
+# 站点地址取自 config.SITE_URL，不在这里再写一份——地址写两处，
+# 迟早漏改一处，而漏改的那处恰好是已经印出去发给陌生人的那张码。
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+import config                                                  # noqa: E402
+
+URL = config.SITE_URL
 
 OUT_DIR = Path(__file__).resolve().parent.parent / "qr"
 

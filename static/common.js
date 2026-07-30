@@ -56,6 +56,68 @@ function initStarfield(sel) {
   }
 }
 
+// ── 生日：年月日三段式输入 ─────────────────────────────────
+
+/* 为什么不用 <input type="date">：
+   安卓（微信内置浏览器尤其）的原生日期控件普遍只给一个「按月翻页」的
+   日历，没有直接选年份的入口。而本站每个访客都要填一个几十年前的日期
+   ——1990 年生的人得往前翻四百多次。这不是体验瑕疵，是让人直接放弃填表，
+   而填表是整条漏斗的入口。
+
+   改成「年份用数字键盘直接打 + 月日用短下拉」：四位数字两秒打完；月只有
+   12 项、日最多 31 项，短列表在各家浏览器上都稳（长列表在微信内核有渲染
+   问题，出生地选择器就是为此才改成自绘的）。 */
+function initBirthDate() {
+  const yEl = $('#by'), mEl = $('#bm'), dEl = $('#bd');
+  if (!yEl || !mEl || !dEl) return null;
+
+  const fill = (sel, n, suffix) => {
+    const keep = Number(sel.value) || 0;
+    sel.innerHTML = '';
+    for (let i = 1; i <= n; i++) {
+      const o = document.createElement('option');
+      o.value = String(i);
+      o.textContent = i + suffix;
+      sel.append(o);
+    }
+    // 原值超出新范围时收敛到该月最后一天，而不是跳回 1 日——
+    // 选了 31 日再把月份改成 2 月，用户想要的是月末而不是月初。
+    sel.value = String(keep ? Math.min(keep, n) : 1);
+  };
+
+  fill(mEl, 12, ' 月');
+
+  /* 日数随年月变：闰年 2 月 29 天、小月 30 天。
+     Date(y, m, 0) 即「第 m 月的最后一天」，闰年规则由浏览器负责，不用自己判。 */
+  function rebuildDays() {
+    const y = Number(yEl.value);
+    const m = Number(mEl.value) || 1;
+    const base = (Number.isInteger(y) && y >= 1900 && y <= 2100) ? y : 2000;
+    fill(dEl, new Date(base, m, 0).getDate(), ' 日');
+  }
+  rebuildDays();
+
+  yEl.addEventListener('change', rebuildDays);
+  yEl.addEventListener('input', rebuildDays);
+  mEl.addEventListener('change', rebuildDays);
+
+  return {
+    /** 读出 {year, month, day}；年份缺失或越界返回 null。 */
+    read() {
+      const y = Number(yEl.value);
+      if (!Number.isInteger(y) || y < 1900 || y > 2100) return null;
+      return { year: y, month: Number(mEl.value), day: Number(dEl.value) };
+    },
+    /** 回填（从 URL 参数带生辰过来时用）。 */
+    set(y, m, d) {
+      yEl.value = String(y);
+      mEl.value = String(m);
+      rebuildDays();
+      dEl.value = String(d);
+    },
+  };
+}
+
 // ── 微信卡 ───────────────────────────────────────────────
 
 /* 两个页面的微信卡 DOM 完全一样，配置也来自同一个接口。

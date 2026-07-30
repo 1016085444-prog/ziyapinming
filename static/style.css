@@ -457,6 +457,27 @@ input:focus, select:focus {
   box-shadow: 0 0 0 3px rgba(205,163,73,.10);
 }
 
+/* 生日三段式。为什么不用原生日期控件，见 common.js 里 initBirthDate 的说明。 */
+.date-group { display: flex; gap: .5rem; }
+.date-group > * { min-width: 0; }
+.date-group input { flex: 1.15; }
+.date-group select { flex: 1; }
+
+/* 去掉数字框的上下箭头：这里要的是直接打四位数，
+   箭头既用不上，又会挤掉本就不宽的输入区。 */
+.date-group input::-webkit-outer-spin-button,
+.date-group input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.date-group input {
+  -moz-appearance: textfield;
+  appearance: textfield;
+  text-align: center;
+  letter-spacing: .06em;
+}
+.date-group input::placeholder { letter-spacing: normal; color: var(--faint); }
+
 /* ── 出生地：伪装成输入框的按钮 + 底部选择器 ───────────────── */
 
 .place-field {
@@ -890,6 +911,42 @@ body.sheet-open { overflow: hidden; }
   padding-top: .8rem;
   border-top: 1px solid var(--line);
 }
+
+/* ── 换体系的入口 ───────────────────────────────────────── */
+
+/* 两套体系各有盲区：子平擅长看势与节奏，紫微擅长看落在哪一块。
+   看完一张自然会想看另一张，所以这个入口给得比普通链接显眼一些。
+
+   必须住在 style.css 而不是 ziwei.css：两个页面都有这个入口，而八字页
+   只加载 style.css。放错文件的后果是八字页上它退化成一个裸链接——
+   样式缺失不会报错，只会安静地丑一半。 */
+.switch-system {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: .6rem;
+  flex-wrap: wrap;
+  margin-top: 1.1rem;
+  padding: .8rem .95rem;
+  border: 1px solid var(--line-warm);
+  border-radius: 12px;
+  background: rgba(205,163,73,.05);
+  text-decoration: none;
+  color: var(--text);
+}
+.switch-system b {
+  font-family: var(--serif);
+  font-size: .95rem;
+  font-weight: 600;
+  letter-spacing: .03em;
+}
+.switch-system em {
+  font-style: normal;
+  font-size: .74rem;
+  color: var(--gold);
+  white-space: nowrap;
+}
+.switch-system:active { background: rgba(205,163,73,.11); }
 
 /* ── 「为什么两套体系分数不同」 ─────────────────────────────
    八字页与紫微页共用。折叠而不是常展：有这个疑问的人一眼就会点开，

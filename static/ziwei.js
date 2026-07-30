@@ -47,6 +47,7 @@ let chartData = null;
 
 initStarfield('#starfield');
 ZiyaPlaces.initPicker();
+const birthDate = initBirthDate();
 const askQuestion = initWechat(state);
 
 $('#go-form').addEventListener('click', () => scrollToEl($('#intake'), 16));
@@ -75,18 +76,22 @@ function readForm(form) {
   const errBox = $('#form-error');
   errBox.hidden = true;
 
-  const date = form.date.value;
+  const ymd = birthDate.read();
   const time = form.time.value;
-  if (!date || !time) {
-    errBox.textContent = '请填写出生日期与时刻';
+  if (!ymd) {
+    errBox.textContent = '请填写出生年份（1900–2100 之间）';
+    errBox.hidden = false;
+    return null;
+  }
+  if (!time) {
+    errBox.textContent = '请填写出生时刻';
     errBox.hidden = false;
     return null;
   }
 
-  const [y, mo, d] = date.split('-').map(Number);
   const [h, mi] = time.split(':').map(Number);
   return {
-    year: y, month: mo, day: d, hour: h, minute: mi,
+    year: ymd.year, month: ymd.month, day: ymd.day, hour: h, minute: mi,
     gender: form.gender.value,
     tst: form.tst.checked, latezi: form.latezi.checked, dst: form.dst.checked,
     yb: form.yb.value, lm: form.lm.value,
@@ -164,7 +169,7 @@ async function cast(p, beat) {
 
   const form = $('#birth-form');
   const pad = (n) => String(n).padStart(2, '0');
-  form.date.value = b.year + '-' + pad(b.month) + '-' + pad(b.day);
+  birthDate.set(b.year, b.month, b.day);
   form.time.value = pad(b.hour) + ':' + pad(b.minute);
   form.gender.value = b.gender;
   form.tst.checked = b.tst;

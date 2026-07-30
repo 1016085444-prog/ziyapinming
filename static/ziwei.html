@@ -164,18 +164,27 @@
   </p>
 
   <form id="birth-form">
+    <!-- 生日不用 <input type="date">：安卓的原生日历只能按月翻页，没有直接
+         选年份的入口，填一个几十年前的日期要翻几百次。年份改成数字键盘直接打，
+         月日用短下拉。详见 common.js 里 initBirthDate 的说明。 -->
     <div class="field-row">
-      <label class="field">
+      <div class="field">
         <span>出生日期</span>
-        <input type="date" name="date" required>
-      </label>
+        <div class="date-group">
+          <input type="number" id="by" inputmode="numeric" autocomplete="bday-year"
+                 min="1900" max="2100" step="1" placeholder="年份" required
+                 aria-label="出生年份">
+          <select id="bm" aria-label="出生月份"></select>
+          <select id="bd" aria-label="出生日"></select>
+        </div>
+      </div>
+    </div>
+
+    <div class="field-row">
       <label class="field">
         <span>出生时刻</span>
         <input type="time" name="time" required>
       </label>
-    </div>
-
-    <div class="field-row">
       <label class="field">
         <span>性别</span>
         <select name="gender">
@@ -183,6 +192,9 @@
           <option value="female">女</option>
         </select>
       </label>
+    </div>
+
+    <div class="field-row">
       <div class="field">
         <span>出生地</span>
         <button type="button" class="place-field" id="place-btn"

@@ -52,38 +52,6 @@
   padding-bottom: 1px;
 }
 
-/* ── 换体系的入口 ───────────────────────────────────────── */
-
-/* 两套体系各有盲区：子平擅长看势与节奏，紫微擅长看落在哪一块。
-   看完一张自然会想看另一张，所以这个入口给得比普通链接显眼一些。 */
-.switch-system {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: .6rem;
-  flex-wrap: wrap;
-  margin-top: 1.1rem;
-  padding: .8rem .95rem;
-  border: 1px solid var(--line-warm);
-  border-radius: 12px;
-  background: rgba(205,163,73,.05);
-  text-decoration: none;
-  color: var(--text);
-}
-.switch-system b {
-  font-family: var(--serif);
-  font-size: .95rem;
-  font-weight: 600;
-  letter-spacing: .03em;
-}
-.switch-system em {
-  font-style: normal;
-  font-size: .74rem;
-  color: var(--gold);
-  white-space: nowrap;
-}
-.switch-system:active { background: rgba(205,163,73,.11); }
-
 /* ── 高级选项里的下拉 ───────────────────────────────────── */
 
 .sel-field { margin: .9rem 0 0; }

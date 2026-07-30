@@ -224,18 +224,27 @@
   </p>
 
   <form id="birth-form">
+    <!-- 生日不用 <input type="date">：安卓的原生日历只能按月翻页，没有直接
+         选年份的入口，填一个几十年前的日期要翻几百次。年份改成数字键盘直接打，
+         月日用短下拉。详见 common.js 里 initBirthDate 的说明。 -->
     <div class="field-row">
-      <label class="field">
+      <div class="field">
         <span>出生日期</span>
-        <input type="date" name="date" required>
-      </label>
+        <div class="date-group">
+          <input type="number" id="by" inputmode="numeric" autocomplete="bday-year"
+                 min="1900" max="2100" step="1" placeholder="年份" required
+                 aria-label="出生年份">
+          <select id="bm" aria-label="出生月份"></select>
+          <select id="bd" aria-label="出生日"></select>
+        </div>
+      </div>
+    </div>
+
+    <div class="field-row">
       <label class="field">
         <span>出生时刻</span>
         <input type="time" name="time" required>
       </label>
-    </div>
-
-    <div class="field-row">
       <label class="field">
         <span>性别</span>
         <select name="gender">
@@ -243,6 +252,9 @@
           <option value="female">女</option>
         </select>
       </label>
+    </div>
+
+    <div class="field-row">
       <!-- 出生地不用原生 select：微信内置浏览器对长列表下拉有渲染问题，
            而这里恰好卡在唯一的转化路径上。改成可搜索的底部选择器，
            顺带把「先选省再选市」压成一步——用户知道「苏州」，
@@ -326,17 +338,21 @@
       <h2>命盘</h2>
       <button class="btn-ghost" id="redo">重新排盘</button>
     </div>
+  <div class="birth-meta" id="birth-meta"></div>
+    <div class="table-scroll">
+      <table class="pillars" id="pillars"></table>
+    </div>
+
     <!-- 换系统看同一个生辰。两套体系各有各的盲区：子平擅长看势与节奏，
          紫微擅长看具体落在哪一块（宫位）。生辰用 URL 参数带过去，
-         用户不必重填一遍——重填一次就会流失一批人。 -->
+         用户不必重填一遍——重填一次就会流失一批人。
+
+         位置与紫微页保持一致：摆在命盘**之后**。先让人看见自己的盘，
+         再给换体系的入口；摆在盘前面等于在人还没看到结果时就让他走。 -->
     <a class="switch-system to-other" id="to-ziwei" href="/ziwei">
       <b>换紫微斗数看这张盘</b>
       <em>同一个生辰，十二宫排一次 →</em>
     </a>
-    <div class="birth-meta" id="birth-meta"></div>
-    <div class="table-scroll">
-      <table class="pillars" id="pillars"></table>
-    </div>
   </div>
 
   <!-- 五维评分。刻意不给「命格总分」——把一生压成一个数字既是虚假的精确，
