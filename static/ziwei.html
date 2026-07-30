@@ -1,0 +1,431 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>子牙品命 · 紫微斗数排盘</title>
+<meta name="description" content="高精度紫微斗数排盘：农历以定朔定气实时推算，不用查表；十四主星带庙旺利陷，四化落宫、大限小限一并排出。排盘免费，不限次数。">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%2313110F'/%3E%3Ctext x='16' y='23' font-size='20' font-family='serif' fill='%23C9A961' text-anchor='middle'%3E%E7%B4%AB%3C/text%3E%3C/svg%3E">
+<link rel="stylesheet" href="/static/style.css?v=__V__">
+<link rel="stylesheet" href="/static/ziwei.css?v=__V__">
+</head>
+<body>
+
+<!-- 氛围层：与八字页同一个十二地支环。两页共用一套视觉语言，
+     换体系不该像换了个网站。 -->
+<svg class="ring" viewBox="0 0 100 100" aria-hidden="true" focusable="false">
+  <circle cx="50" cy="50" r="45.5" fill="none" stroke="#CDA349" stroke-width=".25"/>
+  <circle cx="50" cy="50" r="38"   fill="none" stroke="#CDA349" stroke-width=".15"/>
+  <circle cx="50" cy="50" r="30"   fill="none" stroke="#CDA349" stroke-width=".1"/>
+  <g fill="#CDA349" font-family="Songti SC, STSong, serif" font-size="4.6"
+     text-anchor="middle" dominant-baseline="central">
+    <text x="50"    y="5">子</text>
+    <text x="72.5"  y="11.03">丑</text>
+    <text x="88.97" y="27.5">寅</text>
+    <text x="95"    y="50">卯</text>
+    <text x="88.97" y="72.5">辰</text>
+    <text x="72.5"  y="88.97">巳</text>
+    <text x="50"    y="95">午</text>
+    <text x="27.5"  y="88.97">未</text>
+    <text x="11.03" y="72.5">申</text>
+    <text x="5"     y="50">酉</text>
+    <text x="11.03" y="27.5">戌</text>
+    <text x="27.5"  y="11.03">亥</text>
+  </g>
+</svg>
+
+<header class="masthead">
+  <div class="brand">
+    <span class="brand-mark">子牙品命</span>
+    <span class="brand-sub">紫微斗数 · 十二宫排盘</span>
+  </div>
+</header>
+
+<main>
+
+<div id="landing">
+
+<!-- ── 首屏 ──────────────────────────────────────────────
+     八字页用太极，这里用北斗与紫微星。不是为了换个花样：紫微星就是
+     北极星，北斗绕之而行，「紫微」这个名字本身指的就是这幅天象。 -->
+<section class="hero hero-zw">
+  <div class="hero-art">
+    <svg class="starfield" id="starfield" aria-hidden="true"></svg>
+
+    <svg class="skymap" viewBox="0 0 200 200" aria-hidden="true">
+      <defs>
+        <radialGradient id="poleGlow">
+          <stop offset="0%"   stop-color="#FFF3D6" stop-opacity=".95"/>
+          <stop offset="28%"  stop-color="#E8CE8A" stop-opacity=".45"/>
+          <stop offset="70%"  stop-color="#CDA349" stop-opacity=".10"/>
+          <stop offset="100%" stop-color="#CDA349" stop-opacity="0"/>
+        </radialGradient>
+        <radialGradient id="dipperGlow">
+          <stop offset="0%"   stop-color="#EAF3FF" stop-opacity=".9"/>
+          <stop offset="100%" stop-color="#EAF3FF" stop-opacity="0"/>
+        </radialGradient>
+        <linearGradient id="ringWarm" x1="12%" y1="4%" x2="88%" y2="96%">
+          <stop offset="0%"   stop-color="#FFEDC4" stop-opacity=".7"/>
+          <stop offset="45%"  stop-color="#CDA349" stop-opacity=".18"/>
+          <stop offset="100%" stop-color="#CDA349" stop-opacity=".04"/>
+        </linearGradient>
+      </defs>
+
+      <!-- 十二宫环：缓慢自转，象征宫位轮转 -->
+      <g class="sky-spin">
+        <circle cx="100" cy="100" r="86" fill="none"
+                stroke="url(#ringWarm)" stroke-width="1.1"/>
+        <circle cx="100" cy="100" r="72" fill="none"
+                stroke="rgba(205,163,73,.14)" stroke-width=".4"
+                stroke-dasharray="2 6"/>
+        <!-- 十二等分刻度 -->
+        <g stroke="rgba(205,163,73,.3)" stroke-width=".5">
+          <line x1="100" y1="14" x2="100" y2="22"/>
+          <line x1="143" y1="25.5" x2="139" y2="32.5"/>
+          <line x1="174.5" y1="57" x2="167.5" y2="61"/>
+          <line x1="186" y1="100" x2="178" y2="100"/>
+          <line x1="174.5" y1="143" x2="167.5" y2="139"/>
+          <line x1="143" y1="174.5" x2="139" y2="167.5"/>
+          <line x1="100" y1="186" x2="100" y2="178"/>
+          <line x1="57" y1="174.5" x2="61" y2="167.5"/>
+          <line x1="25.5" y1="143" x2="32.5" y2="139"/>
+          <line x1="14" y1="100" x2="22" y2="100"/>
+          <line x1="25.5" y1="57" x2="32.5" y2="61"/>
+          <line x1="57" y1="25.5" x2="61" y2="32.5"/>
+        </g>
+      </g>
+
+      <!-- 北斗七星。绕极而行，故整组缓慢绕中心旋转；星点本身不转。 -->
+      <g class="dipper-spin">
+        <polyline class="dipper-line"
+                  points="52,66 70,58 88,62 100,74 118,72 132,86 118,98"
+                  fill="none"/>
+        <g class="dipper-stars">
+          <circle cx="52"  cy="66" r="9" fill="url(#dipperGlow)" opacity=".5"/>
+          <circle cx="52"  cy="66" r="2.3" fill="#F4F8FF"/>
+          <circle cx="70"  cy="58" r="7" fill="url(#dipperGlow)" opacity=".4"/>
+          <circle cx="70"  cy="58" r="1.8" fill="#EAF3FF"/>
+          <circle cx="88"  cy="62" r="7" fill="url(#dipperGlow)" opacity=".4"/>
+          <circle cx="88"  cy="62" r="1.9" fill="#EAF3FF"/>
+          <circle cx="100" cy="74" r="6" fill="url(#dipperGlow)" opacity=".35"/>
+          <circle cx="100" cy="74" r="1.5" fill="#DCE8F7"/>
+          <circle cx="118" cy="72" r="7" fill="url(#dipperGlow)" opacity=".4"/>
+          <circle cx="118" cy="72" r="1.8" fill="#EAF3FF"/>
+          <circle cx="132" cy="86" r="8" fill="url(#dipperGlow)" opacity=".45"/>
+          <circle cx="132" cy="86" r="2.1" fill="#F4F8FF"/>
+          <circle cx="118" cy="98" r="6" fill="url(#dipperGlow)" opacity=".35"/>
+          <circle cx="118" cy="98" r="1.6" fill="#DCE8F7"/>
+        </g>
+      </g>
+
+      <!-- 紫微（北极星）：全图唯一不动的一点，位置刻意偏离几何中心，
+           因为真正的北极星也不在天极正中。 -->
+      <circle cx="100" cy="122" r="34" fill="url(#poleGlow)"/>
+      <circle class="pole-star" cx="100" cy="122" r="3.4" fill="#FFFAEC"/>
+      <circle cx="100" cy="122" r="7.5" fill="none"
+              stroke="rgba(232,206,138,.5)" stroke-width=".5"/>
+    </svg>
+  </div>
+
+  <div class="hero-copy">
+    <p class="eyebrow">紫微斗数 · 定朔定气排盘</p>
+    <h1 class="hero-title">
+      <span class="t-gold">十二宫，</span>
+      <span class="t-plain">各安其位</span>
+    </h1>
+    <div class="rule-diamond"><i></i></div>
+    <p class="hero-sub">
+      以农历为纲，以五行局为尺<br>
+      为你排一张星曜落宫分明的命盘
+    </p>
+
+    <div class="trust">
+      <span><b>◷</b> 约 10 秒</span>
+      <span><b>◈</b> 完全免费</span>
+      <span><b>⛨</b> 不留存生日</span>
+    </div>
+
+    <div class="hero-cta">
+      <button type="button" class="btn-primary" id="go-form">开始排盘</button>
+      <a class="btn-outline" href="#method">了解体系</a>
+    </div>
+    <p class="hero-cross">
+      想看子平八字？<a href="/">回到八字排盘 →</a>
+    </p>
+  </div>
+</section>
+
+<!-- ── 排盘表单。字段与八字页完全一致，多两处流派选项 ────────── -->
+<section id="intake" class="panel">
+  <h2 class="big">排一张你的紫微盘</h2>
+  <p class="lede">
+    农历按定朔定气实时推算，不用查表；十四主星带庙旺利陷，
+    四化落宫与大限小限一并排出。<strong>排盘免费，不限次数。</strong>
+  </p>
+
+  <form id="birth-form">
+    <div class="field-row">
+      <label class="field">
+        <span>出生日期</span>
+        <input type="date" name="date" required>
+      </label>
+      <label class="field">
+        <span>出生时刻</span>
+        <input type="time" name="time" required>
+      </label>
+    </div>
+
+    <div class="field-row">
+      <label class="field">
+        <span>性别</span>
+        <select name="gender">
+          <option value="male">男</option>
+          <option value="female">女</option>
+        </select>
+      </label>
+      <div class="field">
+        <span>出生地</span>
+        <button type="button" class="place-field" id="place-btn"
+                aria-haspopup="dialog">
+          <span id="place-label">上海</span>
+          <i aria-hidden="true">▾</i>
+        </button>
+      </div>
+    </div>
+
+    <details class="advanced">
+      <summary>高级选项</summary>
+      <label class="check">
+        <input type="checkbox" name="tst" checked>
+        <span>启用真太阳时校正
+          <em>按出生地经度与均时差修正。命宫由生时定，差一个时辰就换一宫</em></span>
+      </label>
+      <label class="check">
+        <input type="checkbox" name="latezi" checked>
+        <span>晚子时归次日（子正换日）
+          <em>紫微对这一项比八字更敏感：它直接改农历日，而农历日决定紫微星落哪一宫</em></span>
+      </label>
+      <label class="check">
+        <input type="checkbox" name="dst" checked>
+        <span>自动回退夏令时
+          <em>1986–1991 年中国实行过夏令时，出生证明记的是拨快一小时的墙钟时间。
+            若你确认记录的已是标准时，关掉它</em></span>
+      </label>
+
+      <!-- 这两项八字页没有：八字以立春换年、以节换月，用不到农历，
+           也就没有闰月归属的问题。 -->
+      <label class="field sel-field">
+        <span>生年换年点</span>
+        <select name="yb">
+          <option value="lunar">正月初一换年（紫微主流 · 推荐）</option>
+          <option value="lichun">立春换年（与八字同口径）</option>
+        </select>
+        <em>紫微斗数历来以正月初一论年，本站即按此排。除非你的命理师明确用
+          立春，这一项不必动——只有生在立春之后、春节之前的人，两派的生年
+          干支才会差一整年</em>
+      </label>
+      <label class="field sel-field">
+        <span>闰月定宫</span>
+        <select name="lm">
+          <option value="current">一律按本月（通行做法）</option>
+          <option value="split">前半月本月、后半月下月</option>
+        </select>
+        <em>只在闰月出生时才起作用，其余情况两个选项结果相同</em>
+      </label>
+    </details>
+
+    <button type="submit" class="btn-primary">排 盘</button>
+    <p class="form-error" id="form-error" hidden></p>
+  </form>
+</section>
+
+<!-- ── 体系 ────────────────────────────────────────────── -->
+<section class="panel method" id="method">
+  <h2>为什么这张盘更准</h2>
+  <p class="lede">同一个生辰，不同程序会排出不同的紫微盘。差别集中在这三处。</p>
+
+  <ol class="method-list">
+    <li>
+      <div class="m-head"><span class="m-no">壹</span><b>农历不查表，直接算</b></div>
+      <p>紫微以农历月定命宫、以农历日安紫微，所以农历错一天，满盘皆错。
+         多数程序用 1900–2100 年的压缩查表，表外年份直接失效，
+         <b>2033 年闰十一月</b>这类罕见排法在不少表里本身就是错的。
+         这里用月亮黄经实时解定朔，再按「冬至必在十一月、
+         无中气之月置闰」定月序。</p>
+    </li>
+    <li>
+      <div class="m-head"><span class="m-no">贰</span><b>星曜带庙旺利陷</b></div>
+      <p>同一颗星落在不同宫，力量差别极大——太阳在午是日丽中天，
+         在子是失辉。只标星名不评亮度，等于把十四主星当成十四个标签，
+         紫微最核心的<b>层次感</b>就丢了。这里十四主星每一颗都给出所在宫的亮度。</p>
+    </li>
+    <li>
+      <div class="m-head"><span class="m-no">叁</span><b>流派分歧摆在明处</b></div>
+      <p>换年点用正月初一还是立春、闰月算本月还是下月、庚年化科是太阴还是天同——
+         这些地方各家不同，没有唯一答案。与其偷偷选一种装作没有分歧，
+         不如<b>把选项交给你</b>，并写清每一处采的是哪家口径。</p>
+    </li>
+  </ol>
+
+  <div class="rule-diamond"><i></i></div>
+  <p class="method-foot">
+    紫微讲的是倾向与位置，不是既定的结局。<br>
+    但要谈位置，先得有一张排对的盘。
+  </p>
+</section>
+
+</div><!-- /#landing -->
+
+<!-- ── 命盘结果 ──────────────────────────────────────────── -->
+<section id="result" hidden>
+
+  <div class="panel chart-panel">
+    <div class="chart-head">
+      <h2>紫微命盘</h2>
+      <button class="btn-ghost" id="redo">重新排盘</button>
+    </div>
+    <div class="birth-meta" id="birth-meta"></div>
+
+    <!-- 十二宫盘。四四见方、中央留白是紫微盘的固有形制，
+         点任意一宫看该宫的全部星曜与三方四正。 -->
+    <div class="zw-grid" id="zw-grid"></div>
+    <p class="zw-tip">点任意一宫，看该宫全部星曜与三方四正</p>
+
+    <a class="switch-system" id="to-bazi" href="/">
+      <b>换子平八字看这张盘</b>
+      <em>同一个生辰，四柱排一次 →</em>
+    </a>
+  </div>
+
+  <!-- 六维评分。比八字多一维「心性福分」——福德宫是紫微特有的东西，
+       一个人过得舒不舒服，和事业财富的高低是两件事。 -->
+  <div class="panel">
+    <h2>六维评分</h2>
+    <svg class="radar" id="radar" viewBox="-16 -14 132 130" role="img"
+         aria-label="紫微命盘六维评分雷达图"></svg>
+    <p class="score-lead" id="score-lead"></p>
+    <div class="score-list" id="score-list"></div>
+    <p class="score-note" id="score-note"></p>
+  </div>
+
+  <!-- 四化落宫：全盘信息密度最高的四行 -->
+  <div class="panel">
+    <h2>生年四化</h2>
+    <p class="lede">
+      化禄落哪一宫，那件事顺；化忌落哪一宫，那件事最耗心力。
+      很多人看盘只看这四行，也能说出个大概。
+    </p>
+    <div class="sihua-list" id="sihua-list"></div>
+  </div>
+
+  <div class="panel" id="pattern-panel">
+    <h2>格局</h2>
+    <p class="lede">
+      格局是「星曜组合命中了特定的形状」。这里只说结构的性质，
+      不下吉凶判词——同一个结构在不同处境下走法相反。
+    </p>
+    <div class="pattern-list" id="pattern-list"></div>
+  </div>
+
+  <div class="panel">
+    <h2>大限</h2>
+    <p class="luck-start" id="limit-start"></p>
+    <div class="table-scroll">
+      <div class="luck-strip" id="limit-strip"></div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>流年</h2>
+    <div id="years"></div>
+  </div>
+
+  <!-- 待定论：盘上真正两可、必须知道处境才能判的点 -->
+  <div class="panel inquiry-panel" id="inquiry-panel" hidden>
+    <h2>这几处，盘上定不了</h2>
+    <p class="inquiry-lead">
+      下面几点在你盘上是明确的，但走向取决于你现在的处境——
+      同一个结构，处境不同，结论会完全相反。
+    </p>
+    <div class="inquiry-list" id="inquiry-list"></div>
+  </div>
+
+  <div class="panel wechat-panel" id="wechat">
+    <h2>盘已排好，但这只是骨架</h2>
+    <p class="wechat-lead">
+      星曜落宫的组合、三方四正怎么互相牵动、这一步大限落到你身上究竟意味着什么——
+      盘面本身不会说话，得有人读。
+    </p>
+
+    <p class="q-hint">点一个你想问的，命盘和问题会一起复制好：</p>
+    <div class="suggestions" id="suggestions">
+      <button class="chip">我这张盘的格局怎么看？</button>
+      <button class="chip">化忌落在这一宫要注意什么？</button>
+      <button class="chip">我现在这步大限该怎么用？</button>
+      <button class="chip">我适合做什么行业？</button>
+      <button class="chip">我的感情什么时候有着落？</button>
+    </div>
+
+    <div class="wechat-card">
+      <img class="qr" id="wx-qr" alt="微信二维码" hidden>
+      <div class="wx-id-row">
+        <span class="wx-label">微信号</span>
+        <code id="wx-id">…</code>
+        <button class="btn-copy" id="copy-wx">复制</button>
+      </div>
+      <p class="wx-hint" id="wx-hint"></p>
+      <p class="wx-offer" id="wx-offer"></p>
+    </div>
+  </div>
+
+</section>
+
+<footer>
+  <p>命理是一套传统的解释框架，讲的是倾向与节奏，不是既定的结局。
+     本站内容不构成医疗、法律或投资建议。</p>
+</footer>
+
+</main>
+
+<!-- 覆盖层：必须是 body 的直接子元素。祖先被隐藏时，自身 hidden=false 也没用
+     —— 八字页曾因把它放进隐藏的结果区里，导致出生地根本选不了。 -->
+<div class="sheet" id="place-sheet" hidden role="dialog" aria-modal="true"
+     aria-label="选择出生地">
+  <div class="sheet-mask" data-close></div>
+  <div class="sheet-body">
+    <div class="sheet-head">
+      <b>选择出生地</b>
+      <button type="button" class="sheet-x" data-close aria-label="关闭">✕</button>
+    </div>
+    <div class="sheet-search">
+      <input type="search" id="place-search" autocomplete="off"
+             placeholder="搜城市或省份，如 苏州、江苏、乌鲁木齐">
+    </div>
+    <div class="sheet-list" id="place-list"></div>
+    <p class="sheet-foot">
+      经度只影响真太阳时校正。省内差异通常不足以改变时辰，
+      找不到你的城市就选同省最近的一个。
+    </p>
+  </div>
+</div>
+
+<!-- 宫位详情 -->
+<div class="sheet" id="palace-sheet" hidden role="dialog" aria-modal="true"
+     aria-label="宫位详情">
+  <div class="sheet-mask" data-close></div>
+  <div class="sheet-body">
+    <div class="sheet-head">
+      <b id="ps-title">宫位</b>
+      <button type="button" class="sheet-x" data-close aria-label="关闭">✕</button>
+    </div>
+    <div class="sheet-list" id="ps-body"></div>
+  </div>
+</div>
+
+<div class="toast" id="toast" hidden></div>
+
+<script src="/static/common.js?v=__V__"></script>
+<script src="/static/places.js?v=__V__"></script>
+<script src="/static/ziwei.js?v=__V__"></script>
+</body>
+</html>

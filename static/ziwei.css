@@ -1,0 +1,428 @@
+/* 子牙品命 — 紫微页专属样式。
+
+   全部变量、按钮、卡片、表单、雷达图、标签、微信卡都复用 style.css，
+   本文件只加紫微独有的东西：十二宫盘、四化列表、格局卡、星曜配色。
+
+   两页共用一套视觉语言是刻意的——换体系不该像换了个网站。 */
+
+/* ── 首屏：北斗与紫微星 ─────────────────────────────────── */
+
+/* 紫微星是天极，北斗绕之而行。所以环与斗各自旋转，唯独极星不动——
+   这一条不能省：极星跟着转，整幅天象的意思就没了。 */
+.skymap {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.sky-spin {
+  transform-origin: 100px 100px;
+  animation: spin-slow 240s linear infinite;
+}
+
+/* 北斗绕极而行，周期比宫环快，两层速度差能造出纵深 */
+.dipper-spin {
+  transform-origin: 100px 122px;   /* 绕紫微星而非几何中心 */
+  animation: spin-slow 150s linear infinite;
+}
+
+.dipper-line {
+  stroke: rgba(203,220,239,.30);
+  stroke-width: .7;
+  stroke-linejoin: round;
+}
+
+.pole-star { animation: pole-breathe 6s ease-in-out infinite; }
+
+@keyframes pole-breathe {
+  0%, 100% { opacity: .82; }
+  50%      { opacity: 1; }
+}
+
+.hero-cross {
+  margin: 1rem 0 0;
+  font-size: .8rem;
+  color: var(--faint);
+}
+.hero-cross a {
+  color: var(--gold);
+  text-decoration: none;
+  border-bottom: 1px solid var(--line-warm);
+  padding-bottom: 1px;
+}
+
+/* ── 换体系的入口 ───────────────────────────────────────── */
+
+/* 两套体系各有盲区：子平擅长看势与节奏，紫微擅长看落在哪一块。
+   看完一张自然会想看另一张，所以这个入口给得比普通链接显眼一些。 */
+.switch-system {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: .6rem;
+  flex-wrap: wrap;
+  margin-top: 1.1rem;
+  padding: .8rem .95rem;
+  border: 1px solid var(--line-warm);
+  border-radius: 12px;
+  background: rgba(205,163,73,.05);
+  text-decoration: none;
+  color: var(--text);
+}
+.switch-system b {
+  font-family: var(--serif);
+  font-size: .95rem;
+  font-weight: 600;
+  letter-spacing: .03em;
+}
+.switch-system em {
+  font-style: normal;
+  font-size: .74rem;
+  color: var(--gold);
+  white-space: nowrap;
+}
+.switch-system:active { background: rgba(205,163,73,.11); }
+
+/* ── 高级选项里的下拉 ───────────────────────────────────── */
+
+.sel-field { margin: .9rem 0 0; }
+.sel-field select { margin-bottom: .3rem; }
+.sel-field em {
+  display: block;
+  font-style: normal;
+  font-size: .72rem;
+  line-height: 1.6;
+  color: var(--faint);
+}
+
+/* ── 十二宫盘 ───────────────────────────────────────────
+   四四见方、中央留白是紫微盘的固有形制，不是我们的排版选择，
+   所以窄屏也不改成一列——那就不是紫微盘了。
+   代价是格子里字号必须压得很小；补偿手段是「点一宫看详情」。 */
+
+.zw-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  /* 行高不写死：格子内星数最多的那一宫决定整行高度 */
+  grid-auto-rows: minmax(5.6rem, auto);
+  gap: 2px;
+  margin: .2rem 0 .5rem;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--line);
+  overflow: hidden;
+}
+
+.zw-cell {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  min-width: 0;
+  padding: .3rem .28rem .24rem;
+  background: var(--surface);
+  border: none;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.zw-cell:active { background: var(--surface-2); }
+
+/* 命宫与身宫要一眼找到——读盘的第一个动作就是找命宫 */
+.zw-cell.is-life {
+  background: rgba(205,163,73,.07);
+  box-shadow: inset 0 0 0 1px var(--line-warm);
+}
+.zw-cell.is-limit {
+  box-shadow: inset 0 0 0 1px rgba(232,206,138,.5);
+}
+.zw-cell.is-life.is-limit {
+  box-shadow: inset 0 0 0 1px var(--gold);
+}
+
+/* 中央：出生与命盘要目 */
+.zw-center {
+  grid-column: 2 / span 2;
+  grid-row: 2 / span 2;
+  display: flex;
+  flex-direction: column;
+  gap: .3rem;
+  padding: .6rem .5rem;
+  background: var(--ink);
+  text-align: center;
+  align-items: center;
+  justify-content: center;
+}
+.zwc-row {
+  font-size: .66rem;
+  line-height: 1.55;
+  color: var(--muted);
+}
+.zwc-row b { color: var(--text); font-weight: 500; }
+.zwc-ju {
+  font-family: var(--serif);
+  font-size: 1.02rem;
+  color: var(--gold-lit);
+  letter-spacing: .06em;
+}
+.zwc-sihua {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .18rem;
+  justify-content: center;
+}
+
+/* 星曜 */
+.zw-stars {
+  display: flex;
+  flex-wrap: wrap;
+  align-content: flex-start;
+  gap: 0 .3rem;
+  min-width: 0;
+}
+.zw-star {
+  font-family: var(--serif);
+  font-size: .74rem;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+/* 主星撑住整张盘的视觉重量，辅星退后 */
+.zw-star.major { color: var(--text); font-weight: 600; }
+.zw-star.lucky { color: var(--wood); font-size: .68rem; }
+.zw-star.malefic { color: var(--fire); font-size: .68rem; }
+.zw-star.minor { color: var(--faint); font-size: .64rem; }
+/* 借来的星用括号与虚化表示「这不是本宫自己的」 */
+.zw-star.borrowed { color: var(--muted); font-weight: 400; opacity: .78; }
+/* 借星另起一行，与本宫星曜分开 */
+.zw-borrowed { margin-top: .1rem; }
+
+/* 亮度：庙旺用亮金，落陷压暗。这一层比星名本身更能说明力量 */
+.zw-bright { font-size: .58rem; margin-left: .04em; }
+.b-庙, .b-旺 { color: var(--gold-lit); }
+.b-得, .b-利 { color: var(--gold-dim); }
+.b-平 { color: var(--faint); }
+.b-陷 { color: #8A5148; }
+
+/* 四化徽标。整张盘上最该被看见的四个字，所以给实心底。 */
+.sihua {
+  display: inline-block;
+  min-width: .95em;
+  margin-left: .1em;
+  padding: 0 .16em;
+  border-radius: 3px;
+  font-family: var(--sans);
+  font-size: .54rem;
+  font-weight: 700;
+  line-height: 1.5;
+  vertical-align: .12em;
+}
+.sihua.禄 { background: #2C4A36; color: #9BD9AE; }
+.sihua.权 { background: #4A3A20; color: #E8CE8A; }
+.sihua.科 { background: #1F3A4E; color: #A5CDEA; }
+.sihua.忌 { background: #4E2620; color: #F0A79A; }
+
+/* 宫脚：宫名 + 宫干支一行，大限区间一行。
+   长生与博士十二神在宫位详情里，不上格子——见 ziwei.js 里的说明。 */
+.zw-foot {
+  margin-top: .3rem;
+  padding-top: .22rem;
+  border-top: 1px solid rgba(35,41,54,.9);
+}
+.zwf-top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: .25rem;
+}
+.zwf-name {
+  font-family: var(--serif);
+  font-size: .76rem;
+  color: var(--gold);
+  letter-spacing: .04em;
+  white-space: nowrap;
+}
+.zw-cell.is-life .zwf-name { color: var(--gold-lit); font-weight: 600; }
+.zwf-gz {
+  font-family: var(--serif);
+  font-size: .6rem;
+  color: var(--muted);
+  white-space: nowrap;
+  flex: none;
+}
+.zwf-limit { font-size: .55rem; color: var(--faint); white-space: nowrap; }
+
+/* 身宫角标 */
+.zw-body-tag {
+  position: absolute;
+  top: .22rem;
+  right: .22rem;
+  width: 1.02em;
+  height: 1.02em;
+  border-radius: 50%;
+  background: var(--gold-dim);
+  color: #14161C;
+  font-size: .55rem;
+  font-weight: 700;
+  line-height: 1.02em;
+  text-align: center;
+}
+
+.zw-tip {
+  margin: 0 0 .2rem;
+  font-size: .72rem;
+  color: var(--faint);
+  text-align: center;
+}
+
+/* ── 宫位详情 ───────────────────────────────────────────── */
+
+.ps-sec { padding: .7rem 1.1rem; border-bottom: 1px solid var(--line); }
+.ps-sec:last-child { border-bottom: none; }
+.ps-label {
+  font-size: .68rem;
+  color: var(--faint);
+  letter-spacing: .12em;
+  margin-bottom: .35rem;
+}
+.ps-body-text { font-size: .84rem; line-height: 1.85; color: var(--text); margin: 0; }
+.ps-body-text.dim { color: var(--muted); }
+
+.ps-stars { display: grid; gap: .4rem; }
+.ps-star {
+  display: flex;
+  align-items: baseline;
+  gap: .45rem;
+  flex-wrap: wrap;
+}
+.ps-star-name {
+  font-family: var(--serif);
+  font-size: .95rem;
+  color: var(--text);
+  flex: none;
+}
+.ps-star-mean { font-size: .74rem; color: var(--muted); line-height: 1.7; }
+
+.ps-chips { display: flex; flex-wrap: wrap; gap: .3rem; }
+
+/* ── 四化落宫 ───────────────────────────────────────────── */
+
+.sihua-list { display: grid; gap: .55rem; }
+.sh-item {
+  display: flex;
+  align-items: flex-start;
+  gap: .6rem;
+  padding: .68rem .8rem;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: var(--surface-2);
+}
+.sh-badge {
+  flex: none;
+  width: 2.5rem;
+  padding: .18rem 0;
+  border-radius: 6px;
+  font-size: .7rem;
+  font-weight: 700;
+  text-align: center;
+  letter-spacing: .04em;
+}
+.sh-badge.禄 { background: #2C4A36; color: #9BD9AE; }
+.sh-badge.权 { background: #4A3A20; color: #E8CE8A; }
+.sh-badge.科 { background: #1F3A4E; color: #A5CDEA; }
+.sh-badge.忌 { background: #4E2620; color: #F0A79A; }
+.sh-main { min-width: 0; }
+.sh-head {
+  font-family: var(--serif);
+  font-size: .96rem;
+  color: var(--text);
+  margin-bottom: .16rem;
+}
+.sh-head span { color: var(--gold); }
+.sh-mean { font-size: .76rem; line-height: 1.75; color: var(--muted); margin: 0; }
+
+/* ── 格局 ───────────────────────────────────────────────── */
+
+.pattern-list { display: grid; gap: .6rem; }
+.pat {
+  padding: .72rem .85rem;
+  border: 1px solid var(--line);
+  border-left-width: 2px;
+  border-radius: 10px;
+  background: var(--surface-2);
+}
+/* 性质用左边一条色带表示，而不是用底色——底色会让「考验」的卡片
+   在整页里显得像警告框，那是我们刻意避免的观感。 */
+.pat.助力 { border-left-color: var(--gold); }
+.pat.考验 { border-left-color: #8A5148; }
+.pat.中性 { border-left-color: var(--line-warm); }
+
+.pat-head {
+  display: flex;
+  align-items: baseline;
+  gap: .45rem;
+  flex-wrap: wrap;
+  margin-bottom: .3rem;
+}
+.pat-name {
+  font-family: var(--serif);
+  font-size: 1rem;
+  color: var(--text);
+  letter-spacing: .04em;
+}
+.pat-kind {
+  font-size: .62rem;
+  padding: .06rem .34rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+}
+.pat.助力 .pat-kind { border-color: var(--line-warm); color: var(--gold); }
+.pat.考验 .pat-kind { border-color: rgba(208,100,80,.3); color: #C88476; }
+.pat-basis { font-size: .72rem; color: var(--faint); }
+.pat-note { margin: 0; font-size: .8rem; line-height: 1.85; color: var(--muted); }
+
+/* ── 流年 ───────────────────────────────────────────────── */
+
+/* 复用八字页的 .year-now / .year-mini，只加紫微独有的四化行 */
+.yn-palace {
+  font-family: var(--serif);
+  font-size: .9rem;
+  color: var(--gold-lit);
+}
+.yn-sihua { display: flex; flex-wrap: wrap; gap: .3rem; margin-top: .55rem; }
+.yn-sh {
+  display: flex;
+  align-items: center;
+  gap: .22rem;
+  padding: .16rem .4rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-size: .68rem;
+  color: var(--muted);
+}
+.yn-sh b { color: var(--text); font-weight: 500; }
+
+/* ── 桌面端 ─────────────────────────────────────────────── */
+
+@media (min-width: 620px) {
+  .zw-grid { grid-auto-rows: minmax(7.2rem, auto); gap: 3px; }
+  .zw-star { font-size: .88rem; }
+  .zw-star.lucky, .zw-star.malefic { font-size: .8rem; }
+  .zw-star.minor { font-size: .74rem; }
+  .zw-bright { font-size: .66rem; }
+  .sihua { font-size: .6rem; }
+  .zwf-name { font-size: .88rem; }
+  .zwf-gz { font-size: .72rem; }
+  .zwf-limit { font-size: .62rem; }
+  .zwc-row { font-size: .76rem; }
+  .zwc-ju { font-size: 1.16rem; }
+  .hero-art { right: -6%; width: 62%; }
+}
+
+/* 尊重系统偏好：关掉一切自转，静态天象同样成立 */
+@media (prefers-reduced-motion: reduce) {
+  .sky-spin, .dipper-spin, .pole-star { animation: none; }
+}

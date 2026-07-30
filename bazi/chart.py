@@ -27,7 +27,10 @@ from .ganzhi import (
     twelve_stage,
 )
 
-__all__ = ["Pillar", "LuckPillar", "Chart", "build_chart", "SOLAR_TERM_NAMES"]
+__all__ = [
+    "Pillar", "LuckPillar", "Chart", "build_chart", "SOLAR_TERM_NAMES",
+    "ReckonedTime", "reckon_time", "in_china_dst",
+]
 
 SOLAR_TERM_NAMES = (
     "立春", "雨水", "惊蛰", "春分", "清明", "谷雨",
@@ -275,6 +278,48 @@ def _apply_true_solar(local_dt, longitude, tz_offset):
     return local_dt + timedelta(minutes=longitude_minutes + eot_minutes)
 
 
+@dataclass
+class ReckonedTime:
+    """出生时刻的三种形态，以及是否动过夏令时。
+
+    input_dt      用户填的墙钟时刻。只用于展示与核对，绝不参与推算。
+    standard_dt   夏令时已回退的当地标准时。
+    reckon_dt     真正拿去排盘的时刻（启用真太阳时则已校正）。
+    """
+    input_dt: datetime
+    standard_dt: datetime
+    reckon_dt: datetime
+    dst_adjusted: bool
+    tz: timezone
+
+
+def reckon_time(year, month, day, hour, minute=0,
+                longitude=DEFAULT_LONGITUDE, tz_offset=DEFAULT_TZ,
+                use_true_solar_time=True, adjust_china_dst=True):
+    """把用户填的墙钟时刻归正成可用于推算的时刻。
+
+    八字与紫微斗数取用的历法完全不同（一个按节气、一个按农历），但「用户
+    填的那个时间到底对应哪一刻」是同一个问题：夏令时要不要回退、经度与
+    均时差要不要校正。两套系统必须给出同一个答案，否则同一个人的两张盘会
+    落在不同的时辰上——这种不一致比单张盘算错更难排查。
+    """
+    tz = timezone(timedelta(hours=tz_offset))
+    input_dt = datetime(year, month, day, hour, minute, tzinfo=tz)
+
+    # 夏令时回退必须在一切推算之前完成，否则年月日时全都可能跟着错。
+    standard_dt = input_dt
+    dst_applied = False
+    if adjust_china_dst and abs(tz_offset - 8.0) < 1e-6 and in_china_dst(input_dt):
+        standard_dt = input_dt - timedelta(hours=1)
+        dst_applied = True
+
+    reckon_dt = (
+        _apply_true_solar(standard_dt, longitude, tz_offset)
+        if use_true_solar_time else standard_dt
+    )
+    return ReckonedTime(input_dt, standard_dt, reckon_dt, dst_applied, tz)
+
+
 def _find_month_node(jd_ut, civil_year):
     """定位出生时刻所在的月建。
 
@@ -325,24 +370,19 @@ def build_chart(
     if gender not in ("male", "female"):
         raise ValueError("gender 必须是 'male' 或 'female'")
 
-    tz = timezone(timedelta(hours=tz_offset))
-    local_dt = datetime(year, month, day, hour, minute, tzinfo=tz)
-    # 留住用户填的原始时刻。下面的夏令时回退会就地改掉 local_dt，
-    # 而对外展示、以及转给命理师的消息都必须是用户填的那个时间——
-    # 否则对方拿回退后的时间去别处重排，若那边也做回退就会二次扣减。
-    input_dt = local_dt
-
-    # 夏令时回退：把墙钟时间还原成标准时。必须在一切推算之前完成，
-    # 否则年月日时四柱都可能跟着错。
-    dst_applied = False
-    if adjust_china_dst and abs(tz_offset - 8.0) < 1e-6 and in_china_dst(local_dt):
-        local_dt -= timedelta(hours=1)
-        dst_applied = True
-
-    if use_true_solar_time:
-        reckon_dt = _apply_true_solar(local_dt, longitude, tz_offset)
-    else:
-        reckon_dt = local_dt
+    # 时刻归正与紫微斗数共用一份实现，见 reckon_time 的说明。
+    # input_dt 是用户填的原始时刻，必须留住：对外展示、以及转给命理师的
+    # 消息都得是那个时间——否则对方拿回退后的时间去别处重排，若那边也做
+    # 回退就会二次扣减。
+    rt = reckon_time(
+        year, month, day, hour, minute,
+        longitude=longitude, tz_offset=tz_offset,
+        use_true_solar_time=use_true_solar_time,
+        adjust_china_dst=adjust_china_dst,
+    )
+    tz, input_dt = rt.tz, rt.input_dt
+    local_dt, reckon_dt = rt.standard_dt, rt.reckon_dt
+    dst_applied = rt.dst_adjusted
 
     # --- 年柱、月柱：按绝对时刻与节气比较，与时区无关 -------------------
     jd_ut = julian_day(local_dt.astimezone(timezone.utc).replace(tzinfo=None))

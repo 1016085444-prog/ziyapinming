@@ -326,6 +326,13 @@
       <h2>命盘</h2>
       <button class="btn-ghost" id="redo">重新排盘</button>
     </div>
+    <!-- 换系统看同一个生辰。两套体系各有各的盲区：子平擅长看势与节奏，
+         紫微擅长看具体落在哪一块（宫位）。生辰用 URL 参数带过去，
+         用户不必重填一遍——重填一次就会流失一批人。 -->
+    <a class="switch-system" id="to-ziwei" href="/ziwei">
+      <b>换紫微斗数看这张盘</b>
+      <em>同一个生辰，十二宫排一次 →</em>
+    </a>
     <div class="birth-meta" id="birth-meta"></div>
     <div class="table-scroll">
       <table class="pillars" id="pillars"></table>
@@ -455,6 +462,9 @@
 
 <div class="toast" id="toast" hidden></div>
 
+<!-- 加载顺序有依赖：common.js 提供 $ / el / svgEl 等，places.js 与 app.js 都用 -->
+<script src="/static/common.js?v=__V__"></script>
+<script src="/static/places.js?v=__V__"></script>
 <script src="/static/app.js?v=__V__"></script>
 </body>
 </html>

@@ -1,162 +1,10 @@
-/* 子牙品命 — 前端。无构建步骤，原生 ES module 语法即可。 */
+/* 子牙品命 — 八字页前端。无构建步骤，原生 ES module 语法即可。
+
+   共用的东西不在这里：
+     common.js  剪贴板、提示条、星场、微信卡、雷达图
+     places.js  出生地选择器与城市表、生辰在两页之间的 URL 往返 */
 
 'use strict';
-
-/* 出生地经度决定真太阳时校正量：1° = 4 分钟，而一个时辰是 120 分钟。
-   乌鲁木齐用北京时间时偏差近两小时，足以整体错一到两个时辰。
-
-   坐标取市中心，两位小数（约 1 公里）。这个精度远超需要——1 公里对应
-   的时差不到 0.3 秒，而换柱需要差到分钟级。写更多位只是精确的幻觉。
-
-   覆盖到地级市，是因为用户搜不到自己的城市会觉得这工具不完整，
-   而这种感觉直接折损信任。就精度而言其实差别不大：镇江与南京相距
-   0.65°，折合 2.6 分钟，只有生在时辰交界 2.6 分钟内的人才会因此换柱。
-   也正因如此，找不到的城市选同省邻近的一个就够，不必填经纬度——
-   让用户填经纬度等于把题甩回给用户，没人知道自己出生地的经度。
-
-   条目为 [市名, 经度] 或 [市名, 经度, 时区]（时区省略即 UTC+8）。 */
-const REGIONS = [
-  ['北京', [['北京', 116.41]]],
-  ['天津', [['天津', 117.2]]],
-  ['上海', [['上海', 121.47]]],
-  ['重庆', [['重庆', 106.55]]],
-  ['河北', [['石家庄', 114.51], ['唐山', 118.18], ['保定', 115.48],
-            ['邯郸', 114.54], ['张家口', 114.89], ['秦皇岛', 119.6],
-            ['廊坊', 116.7], ['沧州', 116.86], ['承德', 117.94],
-            ['衡水', 115.67], ['邢台', 114.5]]],
-  ['山西', [['太原', 112.55], ['大同', 113.3], ['临汾', 111.52],
-            ['运城', 111.0], ['长治', 113.11], ['晋中', 112.75],
-            ['晋城', 112.85], ['忻州', 112.73], ['吕梁', 111.14],
-            ['阳泉', 113.58], ['朔州', 112.43]]],
-  ['内蒙古', [['呼和浩特', 111.75], ['包头', 109.84], ['鄂尔多斯', 109.99],
-            ['赤峰', 118.89], ['通辽', 122.24], ['呼伦贝尔', 119.77],
-            ['乌兰察布', 113.11], ['巴彦淖尔', 107.39], ['乌海', 106.83],
-            ['乌兰浩特', 122.07], ['锡林浩特', 116.09]]],
-  ['辽宁', [['沈阳', 123.43], ['大连', 121.62], ['鞍山', 122.99],
-            ['锦州', 121.13], ['丹东', 124.38], ['抚顺', 123.96],
-            ['本溪', 123.77], ['营口', 122.23], ['盘锦', 122.07],
-            ['阜新', 121.67], ['辽阳', 123.18], ['铁岭', 123.84],
-            ['朝阳', 120.45], ['葫芦岛', 120.86]]],
-  ['吉林', [['长春', 125.32], ['吉林市', 126.55], ['延吉', 129.51],
-            ['四平', 124.35], ['通化', 125.94], ['白山', 126.42],
-            ['松原', 124.82], ['白城', 122.84], ['辽源', 125.14]]],
-  ['黑龙江', [['哈尔滨', 126.53], ['齐齐哈尔', 123.92], ['大庆', 125.1],
-            ['牡丹江', 129.63], ['佳木斯', 130.32], ['鸡西', 130.97],
-            ['双鸭山', 131.16], ['伊春', 128.9], ['七台河', 131.0],
-            ['鹤岗', 130.3], ['黑河', 127.53], ['绥化', 126.99]]],
-  ['江苏', [['南京', 118.8], ['苏州', 120.58], ['无锡', 120.3],
-            ['常州', 119.95], ['徐州', 117.18], ['南通', 120.86],
-            ['扬州', 119.42], ['盐城', 120.16], ['连云港', 119.22],
-            ['镇江', 119.45], ['泰州', 119.92], ['淮安', 119.02],
-            ['宿迁', 118.28]]],
-  ['浙江', [['杭州', 120.15], ['宁波', 121.55], ['温州', 120.7],
-            ['绍兴', 120.58], ['嘉兴', 120.76], ['金华', 119.65],
-            ['台州', 121.43], ['湖州', 120.09], ['衢州', 118.87],
-            ['丽水', 119.92], ['舟山', 122.11]]],
-  ['安徽', [['合肥', 117.28], ['芜湖', 118.38], ['蚌埠', 117.39],
-            ['安庆', 117.05], ['阜阳', 115.81], ['马鞍山', 118.51],
-            ['淮南', 117.02], ['淮北', 116.79], ['铜陵', 117.82],
-            ['黄山', 118.34], ['滁州', 118.32], ['宿州', 116.98],
-            ['六安', 116.51], ['亳州', 115.78], ['池州', 117.49],
-            ['宣城', 118.76]]],
-  ['福建', [['福州', 119.3], ['厦门', 118.09], ['泉州', 118.59],
-            ['漳州', 117.65], ['莆田', 119.01], ['三明', 117.64],
-            ['南平', 118.18], ['龙岩', 117.02], ['宁德', 119.55]]],
-  ['江西', [['南昌', 115.89], ['赣州', 114.94], ['九江', 115.99],
-            ['上饶', 117.97], ['宜春', 114.42], ['景德镇', 117.18],
-            ['萍乡', 113.85], ['新余', 114.93], ['鹰潭', 117.07],
-            ['吉安', 114.99], ['抚州', 116.36]]],
-  ['山东', [['济南', 117.0], ['青岛', 120.38], ['烟台', 121.39],
-            ['潍坊', 119.16], ['临沂', 118.35], ['淄博', 118.05],
-            ['济宁', 116.59], ['泰安', 117.09], ['威海', 122.12],
-            ['东营', 118.67], ['日照', 119.53], ['德州', 116.36],
-            ['聊城', 115.99], ['滨州', 118.02], ['菏泽', 115.48],
-            ['枣庄', 117.32]]],
-  ['河南', [['郑州', 113.62], ['洛阳', 112.45], ['南阳', 112.53],
-            ['新乡', 113.93], ['信阳', 114.09], ['安阳', 114.39],
-            ['商丘', 115.65], ['开封', 114.31], ['平顶山', 113.31],
-            ['焦作', 113.24], ['许昌', 113.85], ['漯河', 114.03],
-            ['三门峡', 111.2], ['周口', 114.65], ['驻马店', 114.02],
-            ['濮阳', 115.03], ['鹤壁', 114.3]]],
-  ['湖北', [['武汉', 114.3], ['宜昌', 111.29], ['襄阳', 112.14],
-            ['荆州', 112.24], ['黄石', 115.04], ['十堰', 110.8],
-            ['荆门', 112.2], ['孝感', 113.93], ['黄冈', 114.87],
-            ['咸宁', 114.32], ['随州', 113.38], ['鄂州', 114.89],
-            ['恩施', 109.49]]],
-  ['湖南', [['长沙', 112.94], ['株洲', 113.13], ['衡阳', 112.61],
-            ['岳阳', 113.13], ['常德', 111.7], ['湘潭', 112.94],
-            ['邵阳', 111.47], ['益阳', 112.36], ['郴州', 113.03],
-            ['永州', 111.61], ['怀化', 109.98], ['娄底', 112.01],
-            ['张家界', 110.48]]],
-  ['广东', [['广州', 113.26], ['深圳', 114.06], ['东莞', 113.75],
-            ['佛山', 113.12], ['珠海', 113.55], ['中山', 113.39],
-            ['惠州', 114.41], ['汕头', 116.68], ['湛江', 110.36],
-            ['江门', 113.09], ['韶关', 113.6], ['河源', 114.7],
-            ['梅州', 116.12], ['汕尾', 115.38], ['阳江', 111.98],
-            ['茂名', 110.93], ['肇庆', 112.47], ['清远', 113.05],
-            ['潮州', 116.62], ['揭阳', 116.37], ['云浮', 112.04]]],
-  ['广西', [['南宁', 108.37], ['柳州', 109.42], ['桂林', 110.29],
-            ['北海', 109.12], ['玉林', 110.16], ['梧州', 111.3],
-            ['钦州', 108.62], ['贵港', 109.6], ['百色', 106.62],
-            ['河池', 108.06], ['来宾', 109.23], ['崇左', 107.35],
-            ['防城港', 108.35], ['贺州', 111.55]]],
-  ['海南', [['海口', 110.2], ['三亚', 109.51], ['儋州', 109.58],
-            ['琼海', 110.47]]],
-  ['四川', [['成都', 104.07], ['绵阳', 104.68], ['宜宾', 104.63],
-            ['泸州', 105.44], ['南充', 106.11], ['攀枝花', 101.72],
-            ['德阳', 104.4], ['乐山', 103.76], ['自贡', 104.78],
-            ['内江', 105.06], ['遂宁', 105.57], ['广元', 105.84],
-            ['眉山', 103.85], ['达州', 107.5], ['雅安', 103.0],
-            ['广安', 106.63], ['资阳', 104.63], ['巴中', 106.75],
-            ['西昌', 102.26]]],
-  ['贵州', [['贵阳', 106.63], ['遵义', 106.93], ['六盘水', 104.83],
-            ['安顺', 105.93], ['毕节', 105.28], ['铜仁', 109.19],
-            ['凯里', 107.98], ['都匀', 107.52]]],
-  ['云南', [['昆明', 102.83], ['曲靖', 103.8], ['大理', 100.23],
-            ['丽江', 100.23], ['玉溪', 102.55], ['保山', 99.17],
-            ['昭通', 103.72], ['普洱', 100.97], ['临沧', 100.09],
-            ['景洪', 100.8], ['楚雄', 101.55], ['蒙自', 103.38],
-            ['文山', 104.24], ['芒市', 98.58]]],
-  ['西藏', [['拉萨', 91.11], ['日喀则', 88.88], ['昌都', 97.17],
-            ['林芝', 94.36], ['山南', 91.77], ['那曲', 92.06]]],
-  ['陕西', [['西安', 108.94], ['宝鸡', 107.24], ['咸阳', 108.71],
-            ['汉中', 107.03], ['榆林', 109.73], ['渭南', 109.5],
-            ['延安', 109.49], ['安康', 109.03], ['商洛', 109.94],
-            ['铜川', 108.95]]],
-  ['甘肃', [['兰州', 103.82], ['天水', 105.72], ['张掖', 100.45],
-            ['酒泉', 98.51], ['白银', 104.14], ['武威', 102.63],
-            ['平凉', 106.66], ['庆阳', 107.64], ['定西', 104.63],
-            ['陇南', 104.93], ['金昌', 102.19], ['嘉峪关', 98.29]]],
-  ['青海', [['西宁', 101.78], ['格尔木', 94.9], ['海东', 102.1]]],
-  ['宁夏', [['银川', 106.23], ['石嘴山', 106.38], ['吴忠', 106.2],
-            ['中卫', 105.19], ['固原', 106.24]]],
-  ['新疆', [['乌鲁木齐', 87.62], ['喀什', 75.99], ['伊宁', 81.32],
-            ['克拉玛依', 84.89], ['哈密', 93.51], ['阿克苏', 80.26],
-            ['库尔勒', 86.15], ['昌吉', 87.3], ['石河子', 86.04],
-            ['吐鲁番', 89.19], ['阿勒泰', 88.14], ['塔城', 82.98],
-            ['和田', 79.92], ['博乐', 82.07], ['阿图什', 76.17]]],
-  ['香港', [['香港', 114.17]]],
-  ['澳门', [['澳门', 113.55]]],
-  ['台湾', [['台北', 121.52], ['高雄', 120.31], ['台中', 120.68],
-            ['台南', 120.2], ['桃园', 121.3], ['新竹', 120.97],
-            ['基隆', 121.74], ['花莲', 121.6]]],
-  ['海外', [['东京', 139.69, 9], ['首尔', 126.98, 9], ['新加坡', 103.82, 8],
-            ['吉隆坡', 101.69, 8], ['曼谷', 100.5, 7], ['悉尼', 151.21, 10],
-            ['洛杉矶', -118.24, -8], ['旧金山', -122.42, -8], ['纽约', -74.01, -5],
-            ['温哥华', -123.12, -8], ['多伦多', -79.38, -5], ['伦敦', -0.13, 0],
-            ['巴黎', 2.35, 1], ['柏林', 13.4, 1], ['西雅图', -122.33, -8],
-            ['阿姆斯特丹', 4.9, 1], ['米兰', 9.19, 1], ['莫斯科', 37.62, 3],
-            ['迪拜', 55.27, 4], ['大阪', 135.5, 9], ['墨尔本', 144.96, 10],
-            ['奥克兰', 174.76, 12]]]
-];
-
-const $ = (sel) => document.querySelector(sel);
-const el = (tag, cls, text) => {
-  const n = document.createElement(tag);
-  if (cls) n.className = cls;
-  if (text != null) n.textContent = text;
-  return n;
-};
 
 // summary 保存「八字 + 出生信息」，用于拼接复制给命理师的消息
 let state = { wechatId: '', summary: '' };
@@ -166,243 +14,27 @@ const CAST_BEAT = 850;
 
 // ── 初始化 ───────────────────────────────────────────────
 
-/* 出生地摊平成一维可搜索列表。
-   放弃「省 → 市」两级下拉有两个原因：一是微信内置浏览器对长 select
-   下拉有渲染问题，而这里正卡在唯一的转化路径上；二是两级要求用户先想起
-   「苏州属江苏」，摊平后直接搜城市名，少一步操作也少一层认知负担。 */
-const PLACES = [];
-REGIONS.forEach(function (region) {
-  const prov = region[0];
-  region[1].forEach(function (c) {
-    PLACES.push({
-      city: c[0],
-      prov: prov,
-      // 直辖市与港澳的省市同名，不重复显示
-      label: prov === c[0] ? c[0] : prov + ' · ' + c[0],
-      plain: prov === c[0] ? c[0] : prov + c[0],
-      lon: c[1],
-      tz: c[2] === undefined ? 8 : c[2],
-    });
-  });
-});
-
-const HOT = ['北京', '上海', '广州', '深圳', '成都', '杭州',
-             '武汉', '西安', '重庆', '南京', '天津', '长沙'];
-
-let chosenPlace = PLACES.find(function (p) { return p.city === '上海'; }) || PLACES[0];
-
-(function initPlacePicker() {
-  const btn = $('#place-btn');
-  const label = $('#place-label');
-  const sheet = $('#place-sheet');
-  const search = $('#place-search');
-  const list = $('#place-list');
-
-  function paint() { label.textContent = chosenPlace.label; }
-
-  function row(p) {
-    const b = el('button', 'place-row', p.label);
-    b.type = 'button';
-    if (p === chosenPlace) b.classList.add('on');
-    b.addEventListener('click', function () {
-      chosenPlace = p;
-      paint();
-      close();
-    });
-    return b;
-  }
-
-  function render(q) {
-    q = (q || '').trim();
-    list.innerHTML = '';
-
-    if (!q) {
-      // 无搜索词时先摆常用城市：为了选北京也要滚过三十几个省不合理
-      list.append(el('div', 'sheet-group', '常用'));
-      HOT.forEach(function (n) {
-        const hit = PLACES.find(function (p) { return p.city === n; });
-        if (hit) list.append(row(hit));
-      });
-      list.append(el('div', 'sheet-group', '全部'));
-      PLACES.forEach(function (p) { list.append(row(p)); });
-      return;
-    }
-
-    const hits = PLACES.filter(function (p) {
-      return p.city.indexOf(q) >= 0 || p.prov.indexOf(q) >= 0;
-    });
-    if (!hits.length) {
-      list.append(el('p', 'sheet-empty',
-        '没找到「' + q + '」。可以试省份名，或选同省最近的城市——' +
-        '省内经度差通常不足以改变时辰。'));
-      return;
-    }
-    hits.forEach(function (p) { list.append(row(p)); });
-  }
-
-  function open() {
-    sheet.hidden = false;
-    document.body.classList.add('sheet-open');
-    search.value = '';
-    render('');
-    list.scrollTop = 0;
-    // 故意不自动聚焦搜索框：iOS 会立刻弹出键盘挡掉半屏列表，
-    // 而多数人是来浏览常用城市的，不是来打字的。
-  }
-
-  function close() {
-    sheet.hidden = true;
-    document.body.classList.remove('sheet-open');
-  }
-
-  btn.addEventListener('click', open);
-  sheet.addEventListener('click', function (e) {
-    if (e.target.closest('[data-close]')) close();
-  });
-  search.addEventListener('input', function () { render(search.value); });
-  document.addEventListener('keydown', function (e) {
-    if (e.key === 'Escape' && !sheet.hidden) close();
-  });
-
-  paint();
-})();
-
-/** 读取当前选中的出生地。返回 { name, longitude, tz }。 */
-function selectedPlace() {
-  return {
-    name: chosenPlace.plain,
-    longitude: chosenPlace.lon,
-    tz: chosenPlace.tz,
-  };
-}
-
-/* 星场。用固定种子而不是 Math.random：刷新页面星星不该换位置，
-   否则每次进站都像换了张背景图，反而显得廉价。 */
-(function initStarfield() {
-  const svg = $('#starfield');
-  if (!svg) return;
-
-  let seed = 20260726;
-  const rnd = () => {
-    seed = (seed * 1103515245 + 12345) & 0x7fffffff;
-    return seed / 0x7fffffff;
-  };
-
-  const W = 100, H = 100, NS = 'http://www.w3.org/2000/svg';
-  svg.setAttribute('viewBox', '0 0 ' + W + ' ' + H);
-
-  for (let i = 0; i < 140; i++) {
-    const c = document.createElementNS(NS, 'circle');
-    const bright = rnd();
-    c.setAttribute('cx', (rnd() * W).toFixed(2));
-    c.setAttribute('cy', (rnd() * H).toFixed(2));
-    c.setAttribute('r', (0.08 + bright * 0.32).toFixed(3));
-    c.setAttribute('fill', bright > 0.88 ? '#F0E4C6' : '#CBDCEF');
-    c.setAttribute('opacity', (0.16 + bright * 0.62).toFixed(2));
-    // 少数亮星缓慢明灭，多了会像圣诞灯
-    if (bright > 0.93) {
-      c.setAttribute('class', 'twinkle');
-      c.style.animationDelay = (rnd() * 6).toFixed(1) + 's';
-    }
-    svg.append(c);
-  }
-})();
-
-(async function loadConfig() {
-  try {
-    const cfg = await (await fetch('/api/config')).json();
-    state.wechatId = cfg.wechat_id || '';
-    $('#wx-id').textContent = state.wechatId;
-    $('#wx-offer').textContent = cfg.wechat_offer || '';
-
-    const qr = $('#wx-qr');
-    if (cfg.wechat_qr) {
-      qr.src = cfg.wechat_qr;
-      qr.hidden = false;
-      $('#wx-hint').textContent = '手机上长按二维码识别 · 或复制微信号后在微信里搜索';
-    } else {
-      $('#wx-hint').textContent = '复制微信号后，在微信「添加朋友」里搜索';
-    }
-  } catch (err) {
-    console.warn('配置读取失败：', err);
-  }
-})();
-
-// ── 剪贴板 ───────────────────────────────────────────────
-
-/* 这类链接绝大多数在微信内置浏览器里打开，而那里的 navigator.clipboard
-   时灵时不灵（iOS 尤其），所以兜底路径是主路径而不是摆设。 */
-function legacyCopy(text) {
-  const ta = document.createElement('textarea');
-  ta.value = text;
-  // iOS 上元素不能真的不可见、字号小于 16px 会触发缩放，
-  // 所以用 1px 透明而不是 top:-9999px。
-  ta.style.cssText =
-    'position:fixed;top:0;left:0;width:1px;height:1px;padding:0;' +
-    'border:none;outline:none;opacity:0;font-size:16px';
-  ta.contentEditable = 'true';
-  ta.readOnly = false;
-  document.body.appendChild(ta);
-
-  // iOS Safari / 微信内核只认 Range 选区，单调 select() 拿不到内容
-  const range = document.createRange();
-  range.selectNodeContents(ta);
-  const sel = window.getSelection();
-  sel.removeAllRanges();
-  sel.addRange(range);
-  ta.setSelectionRange(0, text.length);
-
-  let ok = false;
-  try { ok = document.execCommand('copy'); } catch (_) { ok = false; }
-  sel.removeAllRanges();
-  document.body.removeChild(ta);
-  return ok;
-}
-
-async function copyText(text) {
-  try {
-    if (navigator.clipboard && window.isSecureContext) {
-      await navigator.clipboard.writeText(text);
-      return true;
-    }
-  } catch (_) { /* 权限被拒或内置浏览器不支持，落到兜底 */ }
-  return legacyCopy(text);
-}
-
-/* 平滑滚动 + 兜底。
-   某些内置浏览器（微信内核尤其）里 behavior:'smooth' 会静默失效，
-   什么都不发生。主 CTA 绝不能因此变成死按钮，所以滚完校一次位，
-   没到位就直接跳过去。 */
-function scrollToEl(el, offset) {
-  const top = Math.max(0, el.getBoundingClientRect().top + window.scrollY - (offset || 10));
-  try {
-    window.scrollTo({ top: top, behavior: 'smooth' });
-  } catch (_) {
-    window.scrollTo(0, top);
-  }
-  setTimeout(() => {
-    if (Math.abs(window.scrollY - top) > 40) window.scrollTo(0, top);
-  }, 550);
-}
-
-let toastTimer = null;
-function showToast(msg) {
-  const t = $('#toast');
-  t.textContent = msg;
-  t.hidden = false;
-  requestAnimationFrame(() => t.classList.add('show'));
-  clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => {
-    t.classList.remove('show');
-    setTimeout(() => { t.hidden = true; }, 300);
-  }, 2400);
-}
+initStarfield('#starfield');
+ZiyaPlaces.initPicker();
+const selectedPlace = ZiyaPlaces.selected;
+// 返回的 askQuestion 供「待定论」里的按钮取用
+const askQuestion = initWechat(state);
 
 // ── 排盘 ─────────────────────────────────────────────────
 
 $('#birth-form').addEventListener('submit', async (e) => {
   e.preventDefault();
-  const form = e.target;
+  const p = readForm(e.target);
+  if (p) await cast(p, true);
+});
+
+/* 读表单，拼成请求参数。缺日期或时刻则报错并返回 null。
+
+   刻意与 cast 分开：从 URL 带参进来时，参数**直接**交给 cast，不经过
+   「写进表单再读回来」这一圈。浏览器会在同地址重新加载时恢复上一次的
+   表单值，而那次恢复的时机与页尾脚本是竞态的——紫微页曾因此出现过
+   URL 写着 1990 年、盘却按 2000 年排的情况。DOM 不该当作参数的传递通道。 */
+function readForm(form) {
   const errBox = $('#form-error');
   errBox.hidden = true;
 
@@ -411,15 +43,23 @@ $('#birth-form').addEventListener('submit', async (e) => {
   if (!date || !time) {
     errBox.textContent = '请填写出生日期与时刻';
     errBox.hidden = false;
-    return;
+    return null;
   }
 
   const [y, mo, d] = date.split('-').map(Number);
   const [h, mi] = time.split(':').map(Number);
+  return {
+    year: y, month: mo, day: d, hour: h, minute: mi,
+    gender: form.gender.value,
+    tst: form.tst.checked, latezi: form.latezi.checked, dst: form.dst.checked,
+  };
+}
 
+/** 排盘并渲染。beat 为 false 时跳过推演停顿（从 URL 带参进来时用）。 */
+async function cast(p, beat) {
+  const errBox = $('#form-error');
   const place = selectedPlace();
-
-  const btn = form.querySelector('button[type=submit]');
+  const btn = $('#birth-form').querySelector('button[type=submit]');
   btn.disabled = true;
   btn.classList.add('casting');
   btn.textContent = '推 演 中';
@@ -430,13 +70,14 @@ $('#birth-form').addEventListener('submit', async (e) => {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        year: y, month: mo, day: d, hour: h, minute: mi,
-        gender: form.gender.value,
+        year: p.year, month: p.month, day: p.day,
+        hour: p.hour, minute: p.minute,
+        gender: p.gender,
         longitude: place.longitude,
         tz_offset: place.tz,
-        use_true_solar_time: form.tst.checked,
-        late_zi_shifts_day: form.latezi.checked,
-        adjust_china_dst: form.dst.checked,
+        use_true_solar_time: p.tst,
+        late_zi_shifts_day: p.latezi,
+        adjust_china_dst: p.dst,
       }),
     });
     if (!res.ok) throw new Error((await res.json()).detail || '排盘失败');
@@ -446,13 +87,22 @@ $('#birth-form').addEventListener('submit', async (e) => {
     // 排盘是本地计算，几毫秒就返回。这里刻意留一个推演的停顿——
     // 秒出结果会让人觉得只是查了张表，反而折损可信度。
     // 嫌慢就把 CAST_BEAT 调成 0。
-    const wait = CAST_BEAT - (Date.now() - startedAt);
-    if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+    if (beat) {
+      const wait = CAST_BEAT - (Date.now() - startedAt);
+      if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+    }
 
     render(data, place.name);
+    // 把这个生辰挂到「换紫微斗数」的链接上，免得用户重填一遍
+    $('#to-ziwei').href = '/ziwei' + ZiyaPlaces.birthQuery({
+      year: p.year, month: p.month, day: p.day,
+      hour: p.hour, minute: p.minute,
+      gender: p.gender, place: place.name,
+      tst: p.tst, latezi: p.latezi, dst: p.dst,
+    });
     $('#landing').hidden = true;
     $('#result').hidden = false;
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+    window.scrollTo({ top: 0, behavior: beat ? 'smooth' : 'auto' });
   } catch (err) {
     errBox.textContent = err.message;
     errBox.hidden = false;
@@ -461,7 +111,25 @@ $('#birth-form').addEventListener('submit', async (e) => {
     btn.classList.remove('casting');
     btn.textContent = '排 盘';
   }
-});
+}
+
+/* 从紫微页带着生辰跳过来时，直接出盘，不必重填一遍。 */
+(function autoCastFromQuery() {
+  const b = ZiyaPlaces.readBirthQuery();
+  if (!b) return;
+
+  // 先排盘（用 URL 里的参数，不经表单），再填表单供「重新排盘」时核对
+  cast(b, false);
+
+  const form = $('#birth-form');
+  const pad = (n) => String(n).padStart(2, '0');
+  form.date.value = b.year + '-' + pad(b.month) + '-' + pad(b.day);
+  form.time.value = pad(b.hour) + ':' + pad(b.minute);
+  form.gender.value = b.gender;
+  form.tst.checked = b.tst;
+  form.latezi.checked = b.latezi;
+  form.dst.checked = b.dst;
+})();
 
 $('#redo').addEventListener('click', () => {
   $('#result').hidden = true;
@@ -578,112 +246,6 @@ function renderInquiry(items) {
   });
 }
 
-/* 把「八字 + 问题」整段复制好，用户加上微信直接粘贴就能发出第一条消息。
-   省掉「我该说什么」这一步——这一步的摩擦正是私域引流最常见的流失点。 */
-async function askQuestion(question) {
-  const msg = state.summary + '\n想问：' + question;
-  const ok = await copyText(msg);
-  showToast(ok ? '八字和问题已复制，加微信后直接粘贴发我'
-                : '复制失败，请截图本页发我');
-  // 无论复制成不成功都滚过去：复制失败时更需要把联系方式送到眼前
-  scrollToEl($('.wechat-card'), 90);
-}
-
-/* 五维雷达图。半径直接按分数比例走（分数区间 38–96，映射到 38%–96% 半径），
-   不做二次拉伸——拉伸会把差距夸大，看着刺激但不诚实。 */
-const RADAR_R = 34;
-
-function renderScores(data) {
-  if (!data) return;
-  const svg = $('#radar');
-  svg.innerHTML = '';
-
-  const dims = Object.keys(data['维度']);
-  const pts = dims.map(function (name, i) {
-    const rad = ((-90 + i * (360 / dims.length)) * Math.PI) / 180;
-    const score = data['维度'][name]['分数'];
-    return { name: name, score: score, rad: rad,
-             x: 50 + RADAR_R * (score / 100) * Math.cos(rad),
-             y: 50 + RADAR_R * (score / 100) * Math.sin(rad) };
-  });
-
-  const ring = function (frac) {
-    return pts.map(function (p) {
-      return (50 + RADAR_R * frac * Math.cos(p.rad)).toFixed(2) + ',' +
-             (50 + RADAR_R * frac * Math.sin(p.rad)).toFixed(2);
-    }).join(' ');
-  };
-
-  // 参考环：40 / 60 / 80 / 100 分
-  [0.4, 0.6, 0.8, 1].forEach(function (f) {
-    svg.append(svgEl('polygon', {
-      class: 'radar-grid', points: ring(f),
-      'stroke-opacity': f === 1 ? 0.28 : 0.12,
-    }));
-  });
-
-  // 轴线
-  pts.forEach(function (p) {
-    svg.append(svgEl('line', {
-      class: 'radar-axis', x1: 50, y1: 50,
-      x2: (50 + RADAR_R * Math.cos(p.rad)).toFixed(2),
-      y2: (50 + RADAR_R * Math.sin(p.rad)).toFixed(2),
-    }));
-  });
-
-  svg.append(svgEl('polygon', {
-    class: 'radar-area',
-    points: pts.map(function (p) { return p.x.toFixed(2) + ',' + p.y.toFixed(2); }).join(' '),
-  }));
-
-  pts.forEach(function (p) {
-    svg.append(svgEl('circle', { class: 'radar-dot', cx: p.x, cy: p.y, r: 1.5 }));
-
-    // 标签推到轴外侧；左右两侧改变锚点，避免压住图形
-    const lr = RADAR_R + 12;
-    const lx = 50 + lr * Math.cos(p.rad);
-    const ly = 50 + lr * Math.sin(p.rad);
-    const anchor = Math.abs(Math.cos(p.rad)) < 0.25
-      ? 'middle' : (Math.cos(p.rad) > 0 ? 'start' : 'end');
-
-    const t = svgEl('text', { class: 'radar-label', x: lx, y: ly - 2.2,
-                              'text-anchor': anchor });
-    t.textContent = p.name;
-    svg.append(t);
-
-    const s = svgEl('text', { class: 'radar-score', x: lx, y: ly + 3.4,
-                              'text-anchor': anchor });
-    s.textContent = p.score;
-    svg.append(s);
-  });
-
-  // 总述里的 **强调** 转成金色
-  $('#score-lead').innerHTML = String(data['总述'] || '')
-    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-    .replace(/\*\*(.+?)\*\*/g, '<b>$1</b>');
-  $('#score-note').textContent = data['说明'] || '';
-
-  const box = $('#score-list');
-  box.innerHTML = '';
-  dims.forEach(function (name) {
-    const item = data['维度'][name];
-    const d = el('details', 'score-item');
-    // 只默认展开最弱一项：那正是用户最想追问的地方
-    if (name === data['最弱']) d.open = true;
-
-    const sum = el('summary');
-    sum.append(el('span', 'si-name', name));
-    sum.append(el('span', 'si-band', item['评级']));
-    sum.append(el('span', 'si-score', String(item['分数'])));
-    d.append(sum);
-
-    const ul = el('ul');
-    item['依据'].forEach(function (w) { ul.append(el('li', null, w)); });
-    d.append(ul);
-    box.append(d);
-  });
-}
-
 function renderMeta(chart) {
   const b = chart['出生'];
   const box = $('#birth-meta');
@@ -783,11 +345,6 @@ const WUXING = [
 ];
 const R_ORBIT = 32;   // 节点所在圆的半径（viewBox 圆心 50,50）
 
-const svgEl = (tag, attrs) => {
-  const n = document.createElementNS('http://www.w3.org/2000/svg', tag);
-  for (const k in attrs) n.setAttribute(k, attrs[k]);
-  return n;
-};
 
 function renderWuxing(analysis) {
   const svg = $('#wuxing');
@@ -927,18 +484,3 @@ function renderShensha(chart) {
 
   $('#shensha-panel').hidden = !box.children.length;
 }
-
-// ── 引流 ─────────────────────────────────────────────────
-
-/* 点问题标签 = 把「八字 + 问题」整段复制好。
-   用户加上微信直接粘贴就能发出第一条消息，省掉「我该说什么」这一步，
-   这一步的摩擦正是私域引流最常见的流失点。 */
-$('#suggestions').addEventListener('click', (e) => {
-  const chip = e.target.closest('.chip');
-  if (chip) askQuestion(chip.textContent);
-});
-
-$('#copy-wx').addEventListener('click', async () => {
-  const ok = await copyText(state.wechatId);
-  showToast(ok ? '微信号已复制' : '复制失败：' + state.wechatId);
-});
