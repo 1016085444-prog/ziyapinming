@@ -29,7 +29,7 @@ STATIC_DIR = BASE_DIR / "static"
 # 改完这里，重新跑一次 `.venv/bin/python tools/make_qr.py` 即可更新二维码。
 SITE_URL = os.environ.get(
     "SITE_URL",
-    "https://ziyapinming-288718-10-1460102831.sh.run.tcloudbase.com",
+    "https://ziyapinmingzw-288718-10-1460102831.sh.run.tcloudbase.com",
 ).rstrip("/")
 
 # ── 微信引流（必改）──────────────────────────────────────────
