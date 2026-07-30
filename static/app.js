@@ -93,13 +93,15 @@ async function cast(p, beat) {
     }
 
     render(data, place.name);
-    // 把这个生辰挂到「换紫微斗数」的链接上，免得用户重填一遍
-    $('#to-ziwei').href = '/ziwei' + ZiyaPlaces.birthQuery({
+    // 把这个生辰挂到所有「换紫微斗数」的入口上，免得用户重填一遍。
+    // 用类而不是 id：命盘旁与「为什么分数不同」里各有一个入口。
+    const q = '/ziwei' + ZiyaPlaces.birthQuery({
       year: p.year, month: p.month, day: p.day,
       hour: p.hour, minute: p.minute,
       gender: p.gender, place: place.name,
       tst: p.tst, latezi: p.latezi, dst: p.dst,
     });
+    document.querySelectorAll('.to-other').forEach((a) => { a.href = q; });
     $('#landing').hidden = true;
     $('#result').hidden = false;
     window.scrollTo({ top: 0, behavior: beat ? 'smooth' : 'auto' });
