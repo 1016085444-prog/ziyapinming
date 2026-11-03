@@ -1,0 +1,3 @@
+# Windows 批处理必须保持 CRLF 换行，禁止 git 转换
+*.bat -text
+*.sh text eol=lf

@@ -1,0 +1,19 @@
+投研智能体（touyan/）
+
+本目录中的以下部分改编自 TradingAgents（https://github.com/TauricResearch/TradingAgents，
+Copyright Tauric Research），该项目以 Apache License 2.0 授权，许可证全文见
+LICENSE-TradingAgents.txt：
+
+- agents/prompts.py：各智能体角色（分析师、多空研究员、研究主管、交易员、三位风控、
+  投资经理）的提示词，由原项目 v0.7.1 的英文提示词翻译、改写为中文，并按 A 股与基金
+  场景做了增补和删改。
+- agents/pipeline.py：分析师并行 → 多空辩论 → 研究主管 → 交易员 → 风控辩论 → 投资经理
+  的流程与轮次规则，参照原项目 graph/setup.py、graph/conditional_logic.py 重新实现，
+  不依赖 LangGraph。
+- agents/rating.py、agents/dossier.py：评级解析原则（读不出评级记为「待复核」）、
+  核验数据快照等做法参照原项目实现。
+
+以上文件均已修改，与原项目不同；其余代码为本项目编写。
+
+数据接口的地址、参数与字段含义参考了 akshare（MIT License，
+https://github.com/akfamily/akshare）的实现，未复制其代码。

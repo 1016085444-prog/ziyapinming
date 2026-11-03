@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>投研智能体</title>
+<meta name="description" content="股票、基金、ETF 的量化分析与 AI 多智能体深度研究">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%232a78d6'/%3E%3Cpath d='M9 9v14M16 6v20M23 11v12' stroke='%23fff' stroke-width='2' stroke-linecap='round'/%3E%3Crect x='7' y='12' width='4' height='7' rx='1' fill='%23fff'/%3E%3Crect x='14' y='9' width='4' height='10' rx='1' fill='none' stroke='%23fff' stroke-width='1.6'/%3E%3Crect x='21' y='14' width='4' height='6' rx='1' fill='%23fff'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="/static/style.css?v=__V__">
+<script>
+  // 主题尽早生效，避免深色模式下闪一下白屏
+  try {
+    var t = localStorage.getItem('ty.theme'); var u = localStorage.getItem('ty.updown');
+    if (t === '"light"' || t === '"dark"') document.documentElement.dataset.theme = JSON.parse(t);
+    if (u) document.documentElement.dataset.updown = JSON.parse(u);
+  } catch (e) {}
+</script>
+</head>
+<body>
+<header class="topbar">
+  <div class="topbar-inner">
+    <a class="brand" href="#/" aria-label="投研智能体 首页">
+      <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8"/><path d="M9 9v14M16 6v20M23 11v12"/><rect class="f" x="7" y="12" width="4" height="7" rx="1"/><rect class="o" x="14" y="9" width="4" height="10" rx="1"/><rect class="f" x="21" y="14" width="4" height="6" rx="1"/></svg>
+      <span class="brand-name">投研智能体</span>
+    </a>
+    <nav class="nav" aria-label="主导航">
+      <a href="#/" data-nav="home">分析</a>
+      <a href="#/compare" data-nav="compare">对比</a>
+      <a href="#/history" data-nav="history">历史与复盘</a>
+      <a href="#/import" data-nav="import">导入</a>
+      <a href="#/settings" data-nav="settings">设置</a>
+    </nav>
+    <button class="icon-btn" id="themeBtn" type="button" aria-label="切换深浅色" title="切换深浅色">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 1 0 9 9 7 7 0 0 1-9-9z"/></svg>
+    </button>
+  </div>
+</header>
+
+<div id="notice" class="notice" hidden>
+  <div class="notice-inner">
+    <span><strong>使用须知</strong>：本工具根据公开行情数据与大模型自动生成分析，仅供研究与学习参考，不构成任何投资建议。模型和数据都可能出错，请独立判断、自行承担投资风险。</span>
+    <button type="button" class="btn btn-sm" id="noticeOk">我已了解</button>
+  </div>
+</div>
+
+<main id="view" class="view" tabindex="-1"></main>
+
+<footer class="footer">
+  <p>数据来源：东方财富、腾讯证券、天天基金、蛋卷基金、新浪财经等公开接口，可能有延迟或误差。分析方法参考开源项目 TradingAgents（Apache-2.0）。</p>
+  <p>本工具不提供任何投资建议，亦不保证收益。市场有风险，投资需谨慎。</p>
+</footer>
+
+<div id="toasts" class="toasts" aria-live="polite"></div>
+
+<script src="/static/md.js?v=__V__"></script>
+<script src="/static/chart.js?v=__V__"></script>
+<script src="/static/app.js?v=__V__"></script>
+</body>
+</html>

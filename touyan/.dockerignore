@@ -1,0 +1,10 @@
+.venv/
+venv/
+data/
+.env
+__pycache__/
+*.py[cod]
+tests/
+start.sh
+start.bat
+.DS_Store

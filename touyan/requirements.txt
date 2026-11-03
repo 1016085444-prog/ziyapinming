@@ -1,0 +1,16 @@
+# 投研智能体 —— 依赖。Python 3.10 / 3.11 / 3.12 / 3.13 均已跑通全部测试。
+fastapi==0.162.0
+uvicorn==0.54.0
+pydantic==2.14.2
+# 行情数据请求。openai / anthropic SDK 自带的是 httpx2，这里要单独装 httpx
+httpx==0.28.1
+# CSV 上传（0.0.33 起不再支持 Python 3.10）
+python-multipart==0.0.33; python_version >= "3.11"
+python-multipart==0.0.32; python_version < "3.11"
+# 大模型：OpenAI 兼容接口（DeepSeek、通义千问、智谱、Kimi、MiniMax、Ollama……）
+openai==3.42.1
+# 大模型：Claude 官方 SDK
+anthropic==2.4.0
+
+# 可选后备数据源：内置的东方财富、腾讯都失败时兜底；分析加密货币（BTC-USD）需要 yfinance。
+# 需要时手动安装：pip install akshare yfinance
