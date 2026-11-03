@@ -4,19 +4,37 @@
 set -e
 cd "$(dirname "$0")"
 
-PY="${PYTHON:-python3}"
-if ! command -v "$PY" >/dev/null 2>&1; then
-  echo "没有找到 Python 3。请先安装 Python 3.10 或更高版本：https://www.python.org/downloads/"
+# 找一个 3.10 以上的 Python。macOS 自带的 python3 是 3.9，太旧；
+# 从 python.org 或 Homebrew 装的新版本常常不叫 python3，所以按版本号逐个找。
+find_python() {
+  for c in "${PYTHON:-}" python3.13 python3.12 python3.11 python3.10 \
+           /opt/homebrew/bin/python3 /usr/local/bin/python3 \
+           /Library/Frameworks/Python.framework/Versions/3.13/bin/python3 \
+           /Library/Frameworks/Python.framework/Versions/3.12/bin/python3 \
+           /Library/Frameworks/Python.framework/Versions/3.11/bin/python3 \
+           /Library/Frameworks/Python.framework/Versions/3.10/bin/python3 \
+           python3; do
+    [ -n "$c" ] || continue
+    command -v "$c" >/dev/null 2>&1 || continue
+    if "$c" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)' >/dev/null 2>&1; then
+      echo "$c"
+      return 0
+    fi
+  done
+  return 1
+}
+
+if ! PY="$(find_python)"; then
+  echo "没有找到 Python 3.10 或更高版本（macOS 自带的 python3 是 3.9，版本太旧）。"
+  echo "请到 https://www.python.org/downloads/ 下载最新的 Python 3 安装包，双击安装；"
+  echo "装好后关掉这个终端窗口、重新打开一个，再运行一次：bash start.sh"
   exit 1
 fi
-if ! "$PY" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)'; then
-  echo "需要 Python 3.10 或更高版本，当前是 $("$PY" -V 2>&1)"
-  exit 1
-fi
+echo "使用 $("$PY" -V 2>&1)"
 
 if [ ! -x .venv/bin/python ]; then
   echo "首次运行：创建虚拟环境……"
-  "$PY" -m venv .venv
+  "$PY" -m venv --clear .venv
 fi
 
 if [ ! -f .venv/.deps-ok ] || [ requirements.txt -nt .venv/.deps-ok ]; then

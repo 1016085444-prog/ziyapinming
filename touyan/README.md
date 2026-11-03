@@ -20,7 +20,9 @@
 需要 Python 3.10 或更高版本（3.10 – 3.13 都测试过）。
 
 **Windows**：双击 `start.bat`。
-**macOS / Linux**：在终端运行 `./start.sh`。
+**macOS / Linux**：在终端进入 `touyan` 文件夹，运行 `bash start.sh`。
+macOS 自带的 python3 是 3.9，太旧；脚本会自动找已安装的新版本，找不到会提示去
+[python.org](https://www.python.org/downloads/) 下载安装。
 
 第一次会自动创建虚拟环境、安装依赖（优先走清华镜像，失败自动换官方源），之后秒开，
 浏览器打开 http://127.0.0.1:8600 。
