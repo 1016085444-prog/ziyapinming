@@ -37,7 +37,9 @@ if [ ! -x .venv/bin/python ]; then
   "$PY" -m venv --clear .venv
 fi
 
-if [ ! -f .venv/.deps-ok ] || [ requirements.txt -nt .venv/.deps-ok ]; then
+# 装好依赖后把 requirements.txt 抄一份到 .venv/.deps-ok；内容对不上（第一次运行、
+# 或者解压新版本覆盖了旧文件）就重新安装。按内容比而不是按修改时间，覆盖更新也可靠。
+if ! cmp -s requirements.txt .venv/.deps-ok; then
   echo "安装依赖……"
   MIRROR="${PIP_INDEX_URL:-https://pypi.tuna.tsinghua.edu.cn/simple}"
   .venv/bin/python -m pip install -q --upgrade pip -i "$MIRROR" || true
@@ -45,7 +47,7 @@ if [ ! -f .venv/.deps-ok ] || [ requirements.txt -nt .venv/.deps-ok ]; then
     echo "镜像源安装失败，改用官方 PyPI 重试……"
     .venv/bin/python -m pip install -r requirements.txt -i https://pypi.org/simple
   fi
-  touch .venv/.deps-ok
+  cp requirements.txt .venv/.deps-ok
 fi
 
 PORT="${PORT:-8600}"

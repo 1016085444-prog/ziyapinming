@@ -8,3 +8,6 @@ tests/
 start.sh
 start.bat
 .DS_Store
+start-mac.command
+make_package.py
+dist/

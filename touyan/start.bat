@@ -27,7 +27,9 @@ if not exist ".venv\Scripts\python.exe" (
   )
 )
 
-if not exist ".venv\deps-ok" (
+rem 装好依赖后把 requirements.txt 抄一份到 .venv\deps-ok，内容对不上就重新安装（第一次运行、覆盖了新版本）
+fc /b requirements.txt ".venv\deps-ok" >nul 2>nul
+if errorlevel 1 (
   echo 安装依赖……
   ".venv\Scripts\python.exe" -m pip install -q --upgrade pip -i https://pypi.tuna.tsinghua.edu.cn/simple
   ".venv\Scripts\python.exe" -m pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
@@ -40,7 +42,7 @@ if not exist ".venv\deps-ok" (
       exit /b 1
     )
   )
-  echo ok> ".venv\deps-ok"
+  copy /y requirements.txt ".venv\deps-ok" >nul
 )
 
 if "%PORT%"=="" set "PORT=8600"

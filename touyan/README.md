@@ -17,10 +17,11 @@
 
 ## 快速开始
 
-需要 Python 3.10 或更高版本（3.10 – 3.13 都测试过）。
+需要 Python 3.10 或更高版本（3.10 – 3.14 都测试过，3.15 预览版也能跑）。
 
 **Windows**：双击 `start.bat`。
-**macOS / Linux**：在终端进入 `touyan` 文件夹，运行 `bash start.sh`。
+**macOS**：双击 `start-mac.command`（被系统拦下时，到「系统设置 → 隐私与安全性」底部点「仍要打开」）；
+或者在终端进入 `touyan` 文件夹，运行 `bash start.sh`。**Linux** 同样运行 `bash start.sh`。
 macOS 自带的 python3 是 3.9，太旧；脚本会自动找已安装的新版本，找不到会提示去
 [python.org](https://www.python.org/downloads/) 下载安装。
 
@@ -172,6 +173,28 @@ akshare（2026-11 版）的实现；字段含义没有经过它印证的一律�
 - 网络环境千差万别：**「设置 → 数据源自检」**（或 `cli.py doctor`）逐个探测每个数据源，
   哪个通、哪个不通一目了然。
 
+## 分享给别人
+
+```bash
+cd touyan
+python3 make_package.py        # 生成 dist/touyan-日期.zip，约 170 KB
+```
+
+把这个 ZIP 用微信、网盘发给对方即可。对方解压后 Windows 双击 `start.bat`、Mac 双击
+`start-mac.command`；包里附了一份写给对方看的 `使用说明.txt`（装 Python、系统拦截怎么放行、
+怎么填 Key、怎么更新）。每个人在自己的「设置」里填自己的 API Key，模型费用各付各的。
+
+**不要把自己电脑上的 `touyan` 文件夹直接压缩发出去**：`data/settings.json` 里是你的 API Key，
+发出去别人就能用你的额度；`.venv/` 是本机装的依赖，几百 MB，换一台电脑也用不了。
+打包脚本只收运行需要的文件（不含 `data/`、`.venv/`、测试、Dockerfile），`tests/test_package.py`
+会检查这一点。
+
+对方更新到新版本：解压新包，把旧文件夹里的 `data` 文件夹复制进去（设置和历史都在里面）。
+启动脚本按内容比对 `requirements.txt`，依赖有变化会自动补装，直接覆盖旧文件也没问题。
+
+想让别人不用安装、打开网址就能用，见下一节：那样模型费用走你的 Key，务必设置访问密码；
+如果要收费，先看文末「合规」一条。
+
 ## 部署到服务器
 
 服务器上**务必设置访问密码** `APP_PASSWORD`。没设置时，深度分析和修改设置只允许本机访问——
@@ -199,9 +222,9 @@ cd touyan
 python -m unittest discover -s tests -v
 ```
 
-133 个测试，全部离线：数据源用样例响应和替身函数，大模型用脚本化的假模型。覆盖代码解析、
+137 个测试，全部离线：数据源用样例响应和替身函数，大模型用脚本化的假模型。覆盖代码解析、
 指标口径、收益风险指标、各数据源的解析、降级与熔断、评分规则、评级解析、多智能体流程、
-HTTP 接口与访问控制、SSE 任务流。
+HTTP 接口与访问控制、SSE 任务流、分享包的内容。
 
 ## 目录
 
@@ -212,6 +235,8 @@ config.py       配置：环境变量 > data/settings.json > 默认值
 jobs.py         深度分析后台任务与事件流
 store.py        历史记录与复盘（SQLite）
 selftest.py     数据源自检
+make_package.py 打分享包（见「分享给别人」）
+start.bat / start.sh / start-mac.command   一键启动（Windows / 终端 / Mac 双击）
 market/         数据层：代码解析、东方财富 / 腾讯 / 天天基金 / 蛋卷 / 新浪、缓存、降级路由、CSV
 quant/          量化：指标、收益风险、技术信号、基本面、基金、评分、报告、对比
 agents/         多智能体：服务商目录、OpenAI 兼容客户端、Claude 客户端、提示词、核验简报、编排
