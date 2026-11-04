@@ -49,11 +49,4 @@ if [ ! -f .venv/.deps-ok ] || [ requirements.txt -nt .venv/.deps-ok ]; then
 fi
 
 PORT="${PORT:-8600}"
-URL="http://127.0.0.1:${PORT}"
-( sleep 2
-  if command -v open >/dev/null 2>&1; then open "$URL"
-  elif command -v xdg-open >/dev/null 2>&1; then xdg-open "$URL"
-  fi ) >/dev/null 2>&1 &
-
-echo "启动中：${URL}（按 Ctrl+C 退出）"
-exec env PORT="$PORT" .venv/bin/python app.py
+exec env PORT="$PORT" TOUYAN_OPEN_BROWSER=1 .venv/bin/python app.py

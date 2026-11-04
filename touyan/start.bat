@@ -44,7 +44,6 @@ if not exist ".venv\deps-ok" (
 )
 
 if "%PORT%"=="" set "PORT=8600"
-echo 启动中：http://127.0.0.1:%PORT%  （关闭本窗口即退出）
-start "" "http://127.0.0.1:%PORT%"
+set "TOUYAN_OPEN_BROWSER=1"
 ".venv\Scripts\python.exe" app.py
 pause

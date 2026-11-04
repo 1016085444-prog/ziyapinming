@@ -522,12 +522,68 @@ async def http_error(_: Request, exc: StarletteHTTPException):
 app.mount("/static", StaticFiles(directory=str(config.STATIC_DIR)), name="static")
 
 
+def _port_open(host: str, port: int) -> bool:
+    import socket
+    try:
+        with socket.create_connection((host, port), timeout=0.5):
+            return True
+    except OSError:
+        return False
+
+
+def _is_touyan(host: str, port: int) -> bool:
+    """端口上已经跑着的是不是本程序。直连本机，不经过系统代理。"""
+    import http.client
+    try:
+        conn = http.client.HTTPConnection(host, port, timeout=2)
+        conn.request("GET", "/api/health")
+        return json.loads(conn.getresponse().read() or b"{}").get("ok") is True
+    except (OSError, ValueError):
+        return False
+
+
+def _announce_when_ready(url: str, host: str, port: int, open_browser: bool) -> None:
+    """等服务真正开始监听，再提示并打开浏览器。
+
+    第一次启动时 Mac 会对刚装的组件做安全扫描，加载要十几秒；
+    固定等两秒就开浏览器，打开的是一个「无法连接」的页面。
+    """
+    import threading
+    import webbrowser
+
+    def wait():
+        for _ in range(240):
+            if _port_open(host, port):
+                print(f"\n  ✓ 投研智能体已就绪：{url}\n    使用期间不要关闭这个窗口；按 Ctrl+C 退出。\n", flush=True)
+                if open_browser:
+                    webbrowser.open(url)
+                return
+            time.sleep(0.5)
+
+    threading.Thread(target=wait, daemon=True).start()
+
+
 if __name__ == "__main__":
+    import sys
+    import webbrowser
+
     import uvicorn
 
     host = os.environ.get("HOST", "127.0.0.1")
     port = int(os.environ.get("PORT", "8600"))
+    local = "127.0.0.1" if host in ("0.0.0.0", "::", "") else host
+    url = f"http://{local}:{port}"
+    open_browser = os.environ.get("TOUYAN_OPEN_BROWSER") == "1"
+    if _port_open(local, port):
+        if _is_touyan(local, port):
+            print(f"投研智能体已经在运行：{url}")
+            if open_browser:
+                webbrowser.open(url)
+            sys.exit(0)
+        print(f"端口 {port} 被其他程序占用了。换一个端口启动，例如：PORT=8601 bash start.sh")
+        sys.exit(1)
     if host not in ("127.0.0.1", "localhost") and not config.APP_PASSWORD:
         log.warning("服务监听在 %s 且没有设置 APP_PASSWORD：深度分析与设置只允许本机使用。", host)
-    print(f"\n  投研智能体已启动：http://{'127.0.0.1' if host == '0.0.0.0' else host}:{port}\n")
+    print("\n  正在启动投研智能体……（第一次启动可能要十几秒）", flush=True)
+    _announce_when_ready(url, local, port, open_browser)
     uvicorn.run(app, host=host, port=port, log_level="warning")
