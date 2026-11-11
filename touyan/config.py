@@ -66,6 +66,10 @@ class Settings(BaseModel):
     claude_effort: str = "high"
     risk_free_rate: float = Field(2.0, ge=0, le=20)   # %
     timeout: int = Field(300, ge=30, le=1800)
+    daily_auto: bool = True             # 交易日收盘后自动生成每日精选（软件开着时）
+    daily_strategy: str = "balanced"
+    daily_stock_count: int = Field(5, ge=3, le=10)
+    daily_llm: bool = True              # 配置了大模型时，附一段大模型点评
 
 
 _lock = threading.Lock()
@@ -180,6 +184,10 @@ def public(s: Settings) -> dict:
         "claude_effort": s.claude_effort,
         "risk_free_rate": s.risk_free_rate,
         "timeout": s.timeout,
+        "daily_auto": s.daily_auto,
+        "daily_strategy": s.daily_strategy,
+        "daily_stock_count": s.daily_stock_count,
+        "daily_llm": s.daily_llm,
         "locks": env_locks(s.provider),
         "llm_ready": ready,
         "llm_reason": reason,
@@ -211,7 +219,8 @@ def save(patch: dict) -> Settings:
                 else:
                     store.pop(provider, None)
         for field in ("analysts", "debate_rounds", "risk_rounds", "temperature", "max_tokens",
-                      "claude_effort", "risk_free_rate", "timeout"):
+                      "claude_effort", "risk_free_rate", "timeout",
+                      "daily_auto", "daily_strategy", "daily_stock_count", "daily_llm"):
             if field in patch:
                 setattr(current, field, patch[field])
         current = Settings.model_validate(current.model_dump())  # 重新校验取值范围

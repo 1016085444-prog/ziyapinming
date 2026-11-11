@@ -357,3 +357,49 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 14px; }
   .view { max-width: none; padding: 0; }
 }
 @media (max-width: 960px) { .cols-main > .side { order: -1; } }
+
+/* ── 每日精选 ── */
+.daily-head { margin-bottom: 12px; align-items: flex-end; }
+.daily-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; margin-bottom: 16px; }
+.daily-status { display: grid; gap: 8px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); margin-bottom: 16px; font-size: 14px; }
+.regime { padding: 10px 12px; border-radius: 10px; background: var(--surface-2); margin-bottom: 12px; font-size: 14px; }
+.regime strong { margin-right: 8px; }
+.regime.is-up strong { color: var(--up-text); }
+.regime.is-down strong { color: var(--down-text); }
+.idx-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(118px, 1fr)); gap: 8px; margin-bottom: 10px; }
+.idx { display: block; padding: 8px 10px; border: 1px solid var(--border); border-radius: 10px; color: var(--text); text-decoration: none; }
+.idx:hover { border-color: var(--accent); }
+.idx .iv { font-weight: 650; font-variant-numeric: tabular-nums; }
+.sector-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 8px; }
+a.badge { text-decoration: none; }
+a.badge:hover { color: var(--text); }
+.pick { border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; display: grid; gap: 10px; }
+.pick + .pick { margin-top: 12px; }
+.pick-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.pick-rank { width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; background: var(--surface-3); font-weight: 700; font-size: 13px; flex-shrink: 0; }
+.pick-name { font-weight: 700; font-size: 16px; }
+.pick-price { font-variant-numeric: tabular-nums; }
+.pick-score { min-width: 36px; text-align: center; font-weight: 750; font-size: 18px; font-variant-numeric: tabular-nums; }
+.pick-one { margin: 0; font-weight: 600; }
+.badge.sig-buy { background: color-mix(in srgb, var(--good) 16%, transparent); color: var(--good); }
+.badge.sig-watch { background: var(--warn-bg); color: var(--warn-ink); }
+.checks { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; font-size: 13px; }
+.ck { display: grid; grid-template-columns: 16px 84px minmax(0, 1fr); gap: 6px; align-items: baseline; }
+.ck-mark { font-weight: 700; text-align: center; }
+.ck.pass .ck-mark { color: var(--good); }
+.ck.warn .ck-mark { color: var(--warning); }
+.ck.fail .ck-mark { color: var(--critical); }
+.ck-label { color: var(--text-2); }
+.pick-levels { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }
+.lv { background: var(--surface-2); border-radius: 8px; padding: 6px 10px; min-width: 0; }
+.lv .lvv { font-weight: 650; font-variant-numeric: tabular-nums; }
+.pick-advice { display: grid; gap: 4px; color: var(--text-2); }
+.fund-group + .fund-group { margin-top: 18px; }
+.fund-group h3 { margin: 0 0 4px; font-size: 15px; }
+.fund-pick { border-top: 1px solid var(--grid); padding: 10px 0; display: grid; gap: 8px; }
+.tbl tr.hl td { background: var(--accent-soft); }
+@media (max-width: 640px) {
+  .pick { padding: 12px; }
+  .pick-levels { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .ck { grid-template-columns: 16px 76px minmax(0, 1fr); }
+}

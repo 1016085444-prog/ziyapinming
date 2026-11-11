@@ -11,6 +11,7 @@
     POST /api/deep                 发起 AI 深度分析（多智能体，后台运行）
     GET  /api/deep/{id}/events     深度分析实时事件（SSE）
     GET  /api/history…             历史记录与复盘
+    GET/POST /api/daily…           每日精选：大盘、精选股票 / ETF / 基金、历史表现
     GET/POST /api/settings…        大模型设置、连通性测试
     GET  /api/selftest             数据源自检
 
@@ -26,6 +27,7 @@ import hmac
 import json
 import logging
 import os
+import threading
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
@@ -45,6 +47,10 @@ import store as store_mod
 from agents.llm import LLMError, make_llm
 from agents.pipeline import DeepOptions, Pipeline
 from agents.pipeline import to_markdown as deep_markdown
+from daily import runner as daily_runner
+from daily import strategies as daily_strategies
+from daily import text as daily_text
+from daily import track as daily_track
 from jobs import JobManager, coalesce
 from market import csvfile, symbols
 from market.cache import Cache
@@ -61,7 +67,12 @@ log = logging.getLogger("touyan")
 
 @asynccontextmanager
 async def lifespan(_app):
+    stop = threading.Event()
+    if os.environ.get("TOUYAN_DAILY_AUTO", "1").lower() not in ("0", "false", "no", "off"):
+        threading.Thread(target=daily_runner.auto_loop, args=(router, cache, store, stop),
+                         daemon=True, name="daily-auto").start()
     yield
+    stop.set()
     cache.close()
     store.close()
 
@@ -454,6 +465,8 @@ def api_settings():
 @app.post("/api/settings")
 def api_settings_save(patch: dict, request: Request):
     require_trusted(request)
+    if "daily_strategy" in patch and patch["daily_strategy"] not in daily_strategies.STRATEGIES:
+        raise HTTPException(400, "未知的选股风格")
     try:
         return config.public(config.save(patch))
     except ValueError as exc:
@@ -490,6 +503,92 @@ def api_settings_test(request: Request, patch: dict | None = None):
 @app.get("/api/selftest")
 def api_selftest():
     return selftest.run()
+
+
+# ── 每日精选 ───────────────────────────────────────────────────
+
+class DailyRunRequest(BaseModel):
+    strategy: str | None = None
+    stock_count: int | None = Field(None, ge=3, le=10)
+    use_llm: bool | None = None
+
+
+@app.get("/api/daily")
+def api_daily(request: Request, strategy: str | None = None):
+    s = config.load()
+    return {
+        "latest": store.latest_daily(strategy or None),
+        "status": daily_runner.STATUS.snapshot(),
+        "strategies": daily_strategies.public(),
+        "settings": {"auto": s.daily_auto, "strategy": s.daily_strategy, "stock_count": s.daily_stock_count,
+                     "llm": s.daily_llm},
+        "llm_ready": config.llm_ready(s)[0],
+        "can_run": trusted(request),
+    }
+
+
+@app.get("/api/daily/status")
+def api_daily_status():
+    return daily_runner.STATUS.snapshot()
+
+
+@app.post("/api/daily/run")
+def api_daily_run(req: DailyRunRequest, request: Request):
+    require_trusted(request)
+    s = config.load()
+    strategy = req.strategy or s.daily_strategy
+    if strategy not in daily_strategies.STRATEGIES:
+        raise HTTPException(400, "未知的选股风格")
+    started = daily_runner.start_background(
+        router, cache, store, strategy=strategy, stock_count=req.stock_count or s.daily_stock_count,
+        use_llm=s.daily_llm if req.use_llm is None else req.use_llm)
+    if not started:
+        raise HTTPException(409, "每日精选正在生成中，请稍候")
+    return daily_runner.STATUS.snapshot()
+
+
+@app.get("/api/daily/runs")
+def api_daily_runs(limit: int = 60):
+    return {"runs": store.list_daily(max(1, min(limit, 200)))}
+
+
+@app.get("/api/daily/runs/{rid}")
+def api_daily_run_get(rid: str):
+    payload = store.get_daily(rid)
+    if payload is None:
+        raise HTTPException(404, "找不到这条记录")
+    return payload
+
+
+@app.get("/api/daily/runs/{rid}/markdown")
+def api_daily_run_markdown(rid: str):
+    payload = store.get_daily(rid)
+    if payload is None:
+        raise HTTPException(404, "找不到这条记录")
+    return _download(daily_text.to_markdown(payload), f"每日精选_{payload['as_of']}.md")
+
+
+@app.delete("/api/daily/runs/{rid}")
+def api_daily_run_delete(rid: str, request: Request):
+    require_trusted(request)
+    if not store.delete_daily(rid):
+        raise HTTPException(404, "找不到这条记录")
+    return {"ok": True}
+
+
+@app.get("/api/daily/performance")
+def api_daily_performance():
+    runs = store.list_daily(1)
+    key = f"daily:perf:{runs[0]['id'] if runs else 'none'}:{daily_runner.beijing_now():%Y-%m-%d}"
+    hit = cache.get(key, 3 * 3600)
+    if hit is not None:
+        return hit
+    try:
+        result = daily_track.performance(store, router)
+    except SourceError as exc:
+        raise _error(exc) from exc
+    cache.set(key, result)
+    return result
 
 
 # ── 页面 ───────────────────────────────────────────────────────

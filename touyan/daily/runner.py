@@ -1,0 +1,395 @@
+"""每日精选的一次完整运行：大盘 → 选股 → ETF → 场外基金 →（可选）大模型点评 → 保存。
+
+全市场快照和基金排行各取一次；入围的几十只股票、十几只基金再逐只体检。整个过程约 1–3 分钟，
+数据源用的都是已有的降级链路，个别标的取不到会跳过并记在 warnings 里，不会让整次运行失败。
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import threading
+import time
+from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timedelta, timezone
+
+import config
+from agents.llm import LLMError, make_llm, strip_think
+from market import symbols, universe
+from market.models import Instrument, MarketData, Quote
+from market.net import SourceError
+from quant import report as qr
+
+from . import funds as fundpick
+from . import market as mkt
+from . import screen, strategies
+
+log = logging.getLogger("touyan.daily")
+BJ = timezone(timedelta(hours=8))
+DISCLAIMER = ("每日精选由公开数据和固定规则自动生成，用来缩小研究范围，不是买卖指令，也不构成投资建议。"
+              "规则没有经过长期回测验证，请结合「历史表现」和自己的判断使用。")
+
+
+def beijing_now() -> datetime:
+    return datetime.now(BJ)
+
+
+def _r(x, n: int = 2):
+    return round(x, n) if isinstance(x, (int, float)) else x
+
+
+# ── 运行状态（给网页轮询） ────────────────────────────────────────
+
+class RunStatus:
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._data = {"running": False, "stage": "", "message": "", "percent": 0, "error": "",
+                      "started_at": "", "finished_at": "", "run_id": ""}
+
+    def update(self, **kw) -> None:
+        with self._lock:
+            self._data.update(kw)
+
+    def snapshot(self) -> dict:
+        with self._lock:
+            return dict(self._data)
+
+
+STATUS = RunStatus()
+_run_lock = threading.Lock()
+
+
+def is_running() -> bool:
+    return _run_lock.locked()
+
+
+# ── 选股 ──────────────────────────────────────────────────────────
+
+def _quote_from_row(r: dict) -> Quote:
+    return Quote(price=r.get("price"), change_pct=r.get("change_pct"), amount=r.get("amount"),
+                 turnover=r.get("turnover"), pe=r.get("pe"), pb=r.get("pb"), total_cap=r.get("total_mv"),
+                 float_cap=r.get("float_mv"), change_60d=r.get("change_60d"), change_ytd=r.get("ytd"),
+                 industry=r.get("industry", ""), source="全市场快照")
+
+
+def _stock_report(router, r: dict, bench: list, rf: float) -> tuple[Instrument, MarketData, dict]:
+    inst = symbols.from_key(f"{r['market']}:{r['code']}", "stock", r["name"])
+    bars, source = router.series(inst, 400)
+    md = MarketData(instrument=inst, bars=bars, benchmark=symbols.CSI300, benchmark_bars=bench,
+                    quote=_quote_from_row(r), sources={"行情": source, "估值": "全市场快照"},
+                    fetched_at=beijing_now().strftime("%Y-%m-%d %H:%M"))
+    try:
+        md.financials = router.financials(inst)
+    except SourceError as exc:
+        md.warnings.append(f"财务数据取不到：{exc}")
+    return inst, md, qr.build(md, rf, chart_bars=2)
+
+
+def _feature_view(f: dict) -> dict:
+    keys = ("ma5", "ma10", "ma20", "ma60", "bias_ma5", "bias_ma20", "change_20d", "change_60d", "rsi14",
+            "volatility_20d", "drawdown_20d", "atr_pct", "vol_ratio_5_20", "signal_score")
+    out = {k: _r(f.get(k), 3 if k.startswith("ma") else 2) for k in keys}
+    out.update({k: f[k] for k in ("ma_aligned", "ma_bullish", "above_ma20", "macd_status", "rsi_status")})
+    return out
+
+
+def pick_stocks(router, rows: list[dict], strat: dict, n: int, bench: list, rf: float, progress) -> dict:
+    kept, dropped = screen.hard_filter(rows, strat["hard"])
+    ranked = screen.prescreen(kept, strat)
+    pool = ranked[: strat.get("pool", 30)]
+    p = strategies.profile(strat)
+    cands, daily_dropped, failed = [], Counter(), 0
+
+    with ThreadPoolExecutor(max_workers=4) as ex:
+        futures = [(r, ex.submit(_stock_report, router, r, bench, rf)) for r in pool]
+        for i, (r, fut) in enumerate(futures, 1):
+            progress("选股", f"逐只体检初选股票（{i}/{len(pool)}）", 10 + 50 * i / max(len(pool), 1))
+            try:
+                inst, md, rep = fut.result()
+            except Exception as exc:          # 单只失败不影响整体
+                failed += 1
+                log.info("跳过 %s：%s", r["code"], exc)
+                continue
+            if len(md.bars) < 120:
+                daily_dropped["上市不满半年"] += 1
+                continue
+            feats = screen.daily_features(md.bars)
+            reason = screen.daily_reject(feats, strat["daily"])
+            if reason:
+                daily_dropped[reason] += 1
+                continue
+            factors = screen.factor_scores(r, feats, p)
+            s_score = screen.weighted(factors, strat["weights"])
+            pen, notes = screen.risk_penalty(r, feats, strat["risk"])
+            composite = rep["scores"]["composite"]
+            final = screen.final_score(s_score, feats["signal_score"], composite, pen)
+            cands.append({
+                "key": inst.key, "code": inst.code, "name": inst.name or r["name"], "market": inst.market,
+                "industry": rep.get("industry") or r.get("industry") or "",
+                "price": r["price"], "change_pct": r.get("change_pct"), "as_of": rep["as_of"],
+                "pe": _r(r.get("pe")), "pb": _r(r.get("pb")), "total_mv": r.get("total_mv"),
+                "amount": r.get("amount"), "turnover": _r(r.get("turnover")),
+                "score": final, "screen_score": s_score, "signal_score": round(feats["signal_score"], 1),
+                "quant_score": composite, "quant_rating": rep["scores"]["rating"]["label"], "penalty": pen,
+                "factors": factors, "features": _feature_view(feats),
+                "_feats": feats, "_rep": rep, "_row": r, "_notes": notes,
+            })
+
+    cands.sort(key=lambda c: -c["score"])
+    picks = screen.diversify(cands, n)
+    for c in picks:
+        c["dashboard"] = screen.dashboard(c["_row"], c["_feats"], c["_rep"], c["score"], c["_notes"])
+    runners = [{"key": c["key"], "name": c["name"], "code": c["code"], "industry": c["industry"], "score": c["score"]}
+               for c in cands if c not in picks][:8]
+    for c in cands:
+        for k in ("_feats", "_rep", "_row", "_notes"):
+            c.pop(k, None)
+    return {
+        "picks": picks, "runners_up": runners,
+        "funnel": {"universe": len(rows), "passed_hard": len(kept), "pool": len(pool),
+                   "checked": len(pool) - failed, "passed_daily": len(cands), "picked": len(picks),
+                   "dropped": dict(list(dropped.items())[:6]), "daily_dropped": dict(daily_dropped.most_common(6)),
+                   "failed": failed},
+    }
+
+
+# ── ETF ──────────────────────────────────────────────────────────
+
+def _etf_inst(code: str, name: str) -> Instrument:
+    return symbols.from_key(("SH:" if code[0] in "56" else "SZ:") + code, "etf", name)
+
+
+def pick_etfs(router, progress, n: int = 3) -> dict:
+    def one(item):
+        code, name, group = item
+        inst = _etf_inst(code, name)
+        bars, _ = router.series(inst, 300)
+        return {"key": inst.key, "code": code, "name": name, "group": group,
+                "price": _r(bars[-1].close, 3), "as_of": bars[-1].date, "momentum": fundpick.etf_momentum(bars)}
+
+    rows, warnings = [], []
+    with ThreadPoolExecutor(max_workers=4) as ex:
+        futures = [(item, ex.submit(one, item)) for item in fundpick.ETF_POOL]
+        for i, (item, fut) in enumerate(futures, 1):
+            progress("ETF", f"计算 ETF 动量（{i}/{len(futures)}）", 60 + 10 * i / len(futures))
+            try:
+                rows.append(fut.result())
+            except Exception as exc:
+                warnings.append(f"{item[1]}：{exc}")
+    for r in rows:
+        if r["momentum"]:
+            r["momentum"] = {k: _r(v) for k, v in r["momentum"].items()}
+    picks, note = fundpick.etf_picks(rows, n)
+    ranked = sorted((r for r in rows if r["momentum"]), key=lambda r: -r["momentum"]["score"])
+    safe = None
+    if len(picks) < n:
+        code, name, group = fundpick.SAFE_ETF
+        inst = _etf_inst(code, name)
+        safe = {"key": inst.key, "code": code, "name": name, "group": group}
+    return {"picks": picks, "ranking": ranked, "note": note, "safe": safe,
+            "warnings": warnings[:5] + ([f"另有 {len(warnings) - 5} 只取不到"] if len(warnings) > 5 else [])}
+
+
+# ── 场外基金 ──────────────────────────────────────────────────────
+
+def _fund_report(router, row: dict, rf: float) -> dict:
+    inst = Instrument(row["code"], "OF", "fund", row["name"])
+    md = router.load(inst, days=1200, with_news=False)
+    return qr.build(md, rf, chart_bars=2)
+
+
+def pick_funds(router, cache, rf: float, progress) -> dict:
+    groups, warnings = [], []
+    used: set[str] = set()          # 同一只基金可能同时出现在两个类别的排行里，只选一次
+    for gi, (key, label, fts, n) in enumerate(fundpick.FUND_PLAN):
+        progress("基金", f"筛选{label}", 70 + 20 * gi / len(fundpick.FUND_PLAN))
+        rows = []
+        for ft in fts:
+            try:
+                rows += universe.fund_rank(cache, ft)
+            except SourceError as exc:
+                warnings.append(f"{universe.FUND_TYPES[ft]}基金排行取不到：{exc}")
+        ranked = [r for r in fundpick.fund_perf_scores(fundpick.fund_prefilter(rows))
+                  if r["code"] not in used and fundpick.share_class_key(r["name"]) not in used][: max(6, n * 3)]
+        picks, rejected = [], []
+        with ThreadPoolExecutor(max_workers=4) as ex:
+            futures = [(r, ex.submit(_fund_report, router, r, rf)) for r in ranked]
+            for r, fut in futures:
+                try:
+                    rep = fut.result()
+                except Exception as exc:
+                    rep = None
+                    log.info("基金 %s 体检失败：%s", r["code"], exc)
+                score, pros, cons = fundpick.fund_verdict(r, rep)
+                if score is None:
+                    rejected.append({"code": r["code"], "name": r["name"], "reason": (cons or ["未通过"])[0]})
+                    continue
+                m3 = ((rep or {}).get("metrics") or {}).get("3y") or {}
+                profile = ((rep or {}).get("fund") or {}).get("profile") or {}
+                picks.append({
+                    "key": f"OF:{r['code']}", "code": r["code"], "name": r["name"], "category": label,
+                    "type": r["type"], "nav": r.get("nav"), "nav_date": r.get("nav_date"), "fee": r.get("fee"),
+                    "returns": {k: r.get(k) for k in ("m6", "y1", "y2", "y3", "ytd")},
+                    "perf_score": r["perf_score"], "quant_score": rep["scores"]["composite"],
+                    "quant_rating": rep["scores"]["rating"]["label"], "score": score,
+                    "max_drawdown_3y": _r(m3.get("max_drawdown"), 4), "sharpe_3y": _r(m3.get("sharpe")),
+                    "scale": profile.get("scale"), "pros": pros, "cons": cons,
+                })
+        picks.sort(key=lambda x: -x["score"])
+        for x in picks[:n]:
+            used.update((x["code"], fundpick.share_class_key(x["name"])))
+        groups.append({"key": key, "label": label, "picks": picks[:n], "screened": len(ranked),
+                       "rejected": rejected[:4]})
+    return {"groups": groups, "warnings": warnings}
+
+
+# ── 大模型点评（可选） ────────────────────────────────────────────
+
+COMMENT_SYSTEM = (
+    "你是一名谨慎的投研助理。根据用户给的结构化数据写今日点评，350 字以内，分三段：大盘环境；"
+    "精选股票为什么入选、要注意什么；ETF 和基金怎么看。只能引用数据里出现的数字和事实，不编造新闻、业绩或价格；"
+    "不使用「必涨」「稳赚」「强烈推荐」这类词；最后一句提醒：仅供研究参考，不构成投资建议。"
+)
+
+
+def commentary(payload: dict) -> tuple[str | None, str]:
+    s = config.load()
+    ready, reason = config.llm_ready(s)
+    if not ready:
+        return None, reason
+    brief = {
+        "日期": payload["as_of"], "选股风格": payload["strategy"]["label"],
+        "大盘": {"市场温度": payload["market"]["regime"]["label"], "依据": payload["market"]["regime"]["notes"],
+               "指数": [{i["name"]: i["change_pct"]} for i in payload["market"]["indices"]],
+               "涨跌家数": payload["market"].get("breadth"),
+               "领涨行业": [b["name"] for b in payload["market"]["sectors_up"]]},
+        "精选股票": [{"名称": p["name"], "行业": p["industry"], "最终分": p["score"], "结论": p["dashboard"]["one_sentence"],
+                  "检查清单": {c["label"]: c["status"] for c in p["dashboard"]["checklist"]},
+                  "风险": p["dashboard"]["risks"][:3]} for p in payload["stocks"]["picks"]],
+        "ETF": {"入选": [e["name"] for e in payload["etfs"]["picks"]], "说明": payload["etfs"]["note"]},
+        "基金": [{g["label"]: [f["name"] for f in g["picks"]]} for g in payload["funds"]["groups"]],
+    }
+    try:
+        quick, _ = config.llm_configs(s)
+        text = make_llm(quick).complete(COMMENT_SYSTEM, json.dumps(brief, ensure_ascii=False))
+    except LLMError as exc:
+        return None, str(exc)
+    except Exception as exc:                       # 网络等异常：点评可有可无，不能拖垮整次运行
+        return None, f"{type(exc).__name__}: {exc}"
+    return strip_think(text).strip() or None, ""
+
+
+# ── 一次完整运行 ──────────────────────────────────────────────────
+
+def run(router, cache, store, strategy: str | None = None, stock_count: int = 5, use_llm: bool = True,
+        on_progress=None, skip_if_exists: bool = False) -> dict | None:
+    """返回保存好的结果。skip_if_exists=True 且这个交易日已有同风格结果时返回 None（自动任务用）。"""
+    t0 = time.time()
+    key, strat = strategies.get(strategy)
+    stock_count = max(3, min(10, int(stock_count or 5)))
+    rf = config.load().risk_free_rate / 100
+
+    def progress(stage: str, message: str, percent: float):
+        if on_progress:
+            on_progress(stage=stage, message=message, percent=round(percent))
+
+    progress("大盘", "读取全市场行情……", 2)
+    bench, _ = router.series(symbols.CSI300, 800)
+    as_of = bench[-1].date
+    if skip_if_exists and store.daily_exists(as_of, key):
+        return None
+    rows, snap_source, warnings = universe.a_share_snapshot(cache)
+    try:
+        boards = universe.industry_boards(cache)
+    except SourceError as exc:
+        boards = []
+        warnings.append(f"行业板块取不到：{exc}")
+    market = mkt.overview(router, rows, boards, bench)
+    warnings += market.pop("warnings")
+    now = beijing_now()
+    intraday = as_of == now.date().isoformat() and (now.hour, now.minute) < (15, 5)
+
+    progress("选股", "按条件过滤全市场……", 8)
+    stocks = pick_stocks(router, rows, strat, stock_count, bench, rf, progress)
+    etfs = pick_etfs(router, progress)
+    warnings += etfs.pop("warnings")
+    funds = pick_funds(router, cache, rf, progress)
+    warnings += funds.pop("warnings")
+
+    payload = {
+        "as_of": as_of, "created_at": now.strftime("%Y-%m-%d %H:%M:%S"), "intraday": intraday,
+        "strategy": {"key": key, "label": strat["label"], "desc": strat["desc"]},
+        "market": market, "stocks": stocks, "etfs": etfs, "funds": funds,
+        "sources": {"全市场快照": snap_source}, "warnings": warnings, "commentary": None, "disclaimer": DISCLAIMER,
+    }
+    if use_llm:
+        progress("点评", "大模型撰写今日点评……", 92)
+        text, err = commentary(payload)
+        payload["commentary"] = text
+        if err and config.llm_ready(config.load())[0]:
+            warnings.append(f"大模型点评没有生成：{err}")
+    payload["elapsed"] = round(time.time() - t0, 1)
+    progress("保存", "保存结果", 99)
+    payload["id"] = store.save_daily(payload)
+    return payload
+
+
+def start_background(router, cache, store, **kw) -> bool:
+    """后台跑一次。已经在跑时返回 False。"""
+    if not _run_lock.acquire(blocking=False):
+        return False
+    STATUS.update(running=True, stage="准备", message="开始生成每日精选", percent=0, error="",
+                  started_at=beijing_now().strftime("%Y-%m-%d %H:%M:%S"), finished_at="", run_id="")
+
+    def target():
+        try:
+            result = run(router, cache, store, on_progress=STATUS.update, **kw)
+            msg = "这个交易日已经生成过了" if result is None else "已完成"
+            STATUS.update(stage="完成", message=msg, percent=100, run_id=(result or {}).get("id", ""))
+        except Exception as exc:
+            log.exception("每日精选生成失败")
+            STATUS.update(stage="失败", error=str(exc) or type(exc).__name__)
+        finally:
+            STATUS.update(running=False, finished_at=beijing_now().strftime("%Y-%m-%d %H:%M:%S"))
+            _run_lock.release()
+
+    threading.Thread(target=target, daemon=True, name="daily-run").start()
+    return True
+
+
+# ── 收盘后自动生成 ────────────────────────────────────────────────
+
+AUTO_AFTER = (15, 45)        # 北京时间，收盘后数据基本更新完
+_attempts: dict[str, list[float]] = {}
+
+
+def auto_due(now: datetime, latest: dict | None) -> bool:
+    if now.weekday() >= 5 or (now.hour, now.minute) < AUTO_AFTER:
+        return False
+    if latest and latest.get("created_at", "")[:10] == now.date().isoformat():
+        return False
+    tries = _attempts.get(now.date().isoformat(), [])
+    return len(tries) < 3 and (not tries or time.time() - tries[-1] > 1800)
+
+
+def auto_tick(router, cache, store) -> bool:
+    s = config.load()
+    if not s.daily_auto or is_running():
+        return False
+    now = beijing_now()
+    if not auto_due(now, store.latest_daily(s.daily_strategy)):
+        return False
+    _attempts.setdefault(now.date().isoformat(), []).append(time.time())
+    return start_background(router, cache, store, strategy=s.daily_strategy, stock_count=s.daily_stock_count,
+                            use_llm=s.daily_llm, skip_if_exists=True)
+
+
+def auto_loop(router, cache, store, stop: threading.Event, first_delay: float = 60, interval: float = 600) -> None:
+    wait = first_delay
+    while not stop.wait(wait):
+        wait = interval
+        try:
+            auto_tick(router, cache, store)
+        except Exception:
+            log.exception("每日精选自动任务出错")

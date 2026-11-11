@@ -21,7 +21,7 @@ FILES = [
     "requirements.txt", "start.sh", "start.bat", "start-mac.command",
     ".env.example", "README.md", "NOTICE", "LICENSE-TradingAgents.txt",
 ]
-DIRS = ["agents", "market", "quant", "static"]
+DIRS = ["agents", "daily", "market", "quant", "static"]
 EXECUTABLE = {"start.sh", "start-mac.command"}
 
 USAGE = """投研智能体 使用说明
@@ -52,6 +52,8 @@ USAGE = """投研智能体 使用说明
   - 在首页输入代码或名称（600519、腾讯、AAPL、510300、110011……）即可得到量化分析，不需要任何配置。
   - 想用 AI 深度分析：打开「设置」，选一家大模型服务商（推荐 DeepSeek，国内直连、便宜），
     填入你自己的 API Key，点「测试连接」。费用由服务商按用量从你的账户扣。
+  - 「每日精选」：收盘后扫一遍全市场，按固定规则挑出值得关注的股票、ETF 和基金，附买点、止损和风险提示。
+    勾选「交易日收盘后自动生成」，软件开着时每天 15:45 之后自动更新。规则没有经过长期验证，只作研究参考。
   - 打不开行情时：「设置 → 数据源自检」可以看到每个数据源能不能连上。
 
 四、更新到新版本

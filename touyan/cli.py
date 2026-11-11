@@ -5,6 +5,7 @@
     python cli.py analyze 腾讯 --md 报告.md   结果另存为 Markdown
     python cli.py search 茅台                 搜索代码
     python cli.py doctor                      自检：数据源能不能连上、大模型配置是否就绪
+    python cli.py daily                       生成今天的每日精选（股票 + ETF + 场外基金）
     python cli.py serve                       启动网页版（等同 python app.py）
 """
 
@@ -129,6 +130,36 @@ def cmd_doctor(_args) -> int:
     return 0 if res["ok"] else 1
 
 
+def cmd_daily(args) -> int:
+    from daily import runner, strategies, text
+    from store import Store
+
+    cache = Cache(config.CACHE_PATH)
+    store = Store(config.DB_PATH)
+    key, strat = strategies.get(args.strategy or config.load().daily_strategy)
+    print(f"生成每日精选（{strat['label']}），约 1–3 分钟……")
+
+    def progress(stage, message, percent):
+        print(f"  [{percent:>3}%] {stage}：{message}", flush=True)
+
+    try:
+        payload = runner.run(DataRouter(cache), cache, store, strategy=key, stock_count=args.count,
+                             use_llm=not args.no_llm, on_progress=progress)
+    except SourceError as exc:
+        print(f"\n生成失败：{exc}", file=sys.stderr)
+        return 1
+    finally:
+        store.close()
+        cache.close()
+    md = text.to_markdown(payload)
+    if args.md:
+        with open(args.md, "w", encoding="utf-8") as fh:
+            fh.write(md)
+        print(f"\n已保存到 {args.md}")
+    print("\n" + md)
+    return 0
+
+
 def cmd_serve(args) -> int:
     os.environ["HOST"] = args.host
     os.environ["PORT"] = str(args.port)
@@ -153,6 +184,12 @@ def main(argv: list[str] | None = None) -> int:
     p.set_defaults(func=cmd_search)
     p = sub.add_parser("doctor", help="自检数据源与大模型配置")
     p.set_defaults(func=cmd_doctor)
+    p = sub.add_parser("daily", help="生成每日精选")
+    p.add_argument("--strategy", choices=["balanced", "value", "trend"], help="选股风格（默认取设置里的）")
+    p.add_argument("--count", type=int, default=5, help="精选股票数量，3–10")
+    p.add_argument("--no-llm", action="store_true", help="不调用大模型写点评")
+    p.add_argument("--md", help="另存为 Markdown 文件")
+    p.set_defaults(func=cmd_daily)
     p = sub.add_parser("serve", help="启动网页版")
     p.add_argument("--host", default="127.0.0.1")
     p.add_argument("--port", type=int, default=8600)

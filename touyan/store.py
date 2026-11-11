@@ -40,6 +40,15 @@ CREATE TABLE IF NOT EXISTS analyses (
     report_json TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_analyses_inst ON analyses(inst_key, created_at);
+CREATE TABLE IF NOT EXISTS daily_runs (
+    id TEXT PRIMARY KEY,
+    created_at TEXT NOT NULL,
+    as_of TEXT NOT NULL,
+    strategy TEXT NOT NULL,
+    summary_json TEXT NOT NULL,
+    payload_json TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_daily_asof ON daily_runs(as_of, strategy);
 """
 
 _LIST_COLS = ("id", "created_at", "inst_key", "code", "market", "kind", "name", "as_of", "price",
@@ -100,6 +109,67 @@ class Store:
     def delete(self, rid: str) -> bool:
         with self._lock:
             cur = self._db.execute("DELETE FROM analyses WHERE id = ?", (rid,))
+            self._db.commit()
+        return cur.rowcount > 0
+
+    # ── 每日精选 ──────────────────────────────────────────────────
+
+    def save_daily(self, payload: dict) -> str:
+        """同一交易日、同一选股风格只留最新一次。"""
+        rid = uuid.uuid4().hex[:12]
+        payload = {**payload, "id": rid}
+        strategy = payload["strategy"]["key"]
+        summary = {
+            "strategy_label": payload["strategy"]["label"],
+            "regime": payload["market"]["regime"]["label"],
+            "stocks": [{"key": p["key"], "name": p["name"], "score": p["score"], "signal": p["dashboard"]["signal"]}
+                       for p in payload["stocks"]["picks"]],
+            "etfs": [{"key": p["key"], "name": p["name"]} for p in payload["etfs"]["picks"]],
+            "funds": [{"key": p["key"], "name": p["name"]} for g in payload["funds"]["groups"] for p in g["picks"]],
+        }
+        with self._lock:
+            self._db.execute("DELETE FROM daily_runs WHERE as_of = ? AND strategy = ?", (payload["as_of"], strategy))
+            self._db.execute("INSERT INTO daily_runs VALUES (?,?,?,?,?,?)",
+                             (rid, payload["created_at"], payload["as_of"], strategy,
+                              json.dumps(summary, ensure_ascii=False), json.dumps(payload, ensure_ascii=False)))
+            self._db.commit()
+        return rid
+
+    def list_daily(self, limit: int = 60) -> list[dict]:
+        with self._lock:
+            rows = self._db.execute("SELECT id, created_at, as_of, strategy, summary_json FROM daily_runs "
+                                    "ORDER BY as_of DESC, created_at DESC LIMIT ?", (limit,)).fetchall()
+        out = []
+        for r in rows:
+            d = dict(r)
+            d.update(json.loads(d.pop("summary_json")))
+            out.append(d)
+        return out
+
+    def get_daily(self, rid: str) -> dict | None:
+        with self._lock:
+            row = self._db.execute("SELECT payload_json FROM daily_runs WHERE id = ?", (rid,)).fetchone()
+        return json.loads(row[0]) if row else None
+
+    def latest_daily(self, strategy: str | None = None) -> dict | None:
+        sql = "SELECT payload_json FROM daily_runs"
+        args: tuple = ()
+        if strategy:
+            sql += " WHERE strategy = ?"
+            args = (strategy,)
+        with self._lock:
+            row = self._db.execute(sql + " ORDER BY as_of DESC, created_at DESC LIMIT 1", args).fetchone()
+        return json.loads(row[0]) if row else None
+
+    def daily_exists(self, as_of: str, strategy: str) -> bool:
+        with self._lock:
+            row = self._db.execute("SELECT 1 FROM daily_runs WHERE as_of = ? AND strategy = ?",
+                                   (as_of, strategy)).fetchone()
+        return row is not None
+
+    def delete_daily(self, rid: str) -> bool:
+        with self._lock:
+            cur = self._db.execute("DELETE FROM daily_runs WHERE id = ?", (rid,))
             self._db.commit()
         return cur.rowcount > 0
 
