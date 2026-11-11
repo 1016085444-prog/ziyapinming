@@ -9,6 +9,7 @@ API Key 不会完整地发给浏览器：前端只拿到 sk-****abcd 这样的�
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import threading
@@ -47,7 +48,10 @@ SETTINGS_PATH = DATA_DIR / "settings.json"
 APP_PASSWORD = os.environ.get("APP_PASSWORD", "")
 ALLOW_REMOTE = os.environ.get("TOUYAN_ALLOW_REMOTE", "").lower() in ("1", "true", "yes", "on")
 MAX_JOBS = int(os.environ.get("TOUYAN_MAX_JOBS", "2"))
-VERSION = "1.0.0"
+VERSION = "1.1.0"
+# 区分「同一份程序」和「另一份（旧版本、另一个文件夹）」：启动时端口被占用要靠它判断。
+# 只给路径的摘要，不把本机路径暴露给别人。
+INSTANCE_ID = hashlib.sha1(str(BASE_DIR).encode("utf-8")).hexdigest()[:10]
 
 EFFORTS = ("low", "medium", "high", "xhigh", "max")
 

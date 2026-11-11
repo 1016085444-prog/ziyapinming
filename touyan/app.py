@@ -159,7 +159,7 @@ def _instrument(key: str | None, q: str | None, kind: str = "auto", name: str = 
 
 @app.get("/api/health")
 def health():
-    return {"ok": True, "version": config.VERSION}
+    return {"ok": True, "version": config.VERSION, "instance": config.INSTANCE_ID}
 
 
 @app.get("/api/config")
@@ -630,15 +630,23 @@ def _port_open(host: str, port: int) -> bool:
         return False
 
 
-def _is_touyan(host: str, port: int) -> bool:
-    """端口上已经跑着的是不是本程序。直连本机，不经过系统代理。"""
+def running_instance(host: str, port: int) -> str | None:
+    """端口上跑着的如果是投研智能体，返回它的实例标识（1.0.0 旧版没有标识，返回空串）；
+    不是本程序（或连不上）返回 None。直连本机，不经过系统代理。"""
     import http.client
     try:
         conn = http.client.HTTPConnection(host, port, timeout=2)
         conn.request("GET", "/api/health")
-        return json.loads(conn.getresponse().read() or b"{}").get("ok") is True
+        data = json.loads(conn.getresponse().read() or b"{}")
     except (OSError, ValueError):
-        return False
+        return None
+    if not isinstance(data, dict) or data.get("ok") is not True:
+        return None
+    return str(data.get("instance") or "")
+
+
+def free_port(host: str, start: int, tries: int = 20) -> int | None:
+    return next((p for p in range(start, start + tries) if not _port_open(host, p)), None)
 
 
 def _announce_when_ready(url: str, host: str, port: int, open_browser: bool) -> None:
@@ -674,13 +682,24 @@ if __name__ == "__main__":
     url = f"http://{local}:{port}"
     open_browser = os.environ.get("TOUYAN_OPEN_BROWSER") == "1"
     if _port_open(local, port):
-        if _is_touyan(local, port):
+        running = running_instance(local, port)
+        if running == config.INSTANCE_ID:
             print(f"投研智能体已经在运行：{url}")
             if open_browser:
                 webbrowser.open(url)
             sys.exit(0)
-        print(f"端口 {port} 被其他程序占用了。换一个端口启动，例如：PORT=8601 bash start.sh")
-        sys.exit(1)
+        if running is None:
+            print(f"端口 {port} 被其他程序占用了。换一个端口启动，例如：PORT=8601 bash start.sh")
+            sys.exit(1)
+        # 另一份投研智能体（旧版本，或另一个文件夹里的）占着端口：直接打开它会让人以为新版没生效
+        alt = free_port(local, port + 1)
+        if alt is None:
+            print(f"端口 {port} 上还开着另一份投研智能体，附近的端口也都被占用了。先关掉之前那份的终端窗口再启动。")
+            sys.exit(1)
+        print(f"\n  端口 {port} 上还开着另一份投研智能体（旧版本，或者另一个文件夹里的那份）。"
+              f"\n  这次先用 {alt} 端口打开这一份；之前那份所在的终端窗口可以关掉了，关掉后下次会回到 {port} 端口。")
+        port = alt
+        url = f"http://{local}:{port}"
     if host not in ("127.0.0.1", "localhost") and not config.APP_PASSWORD:
         log.warning("服务监听在 %s 且没有设置 APP_PASSWORD：深度分析与设置只允许本机使用。", host)
     print("\n  正在启动投研智能体……（第一次启动可能要十几秒）", flush=True)
