@@ -127,7 +127,9 @@ def pick_stocks(router, rows: list[dict], strat: dict, n: int, bench: list, rf: 
             cands.append({
                 "key": inst.key, "code": inst.code, "name": inst.name or r["name"], "market": inst.market,
                 "industry": rep.get("industry") or r.get("industry") or "",
-                "price": r["price"], "change_pct": r.get("change_pct"), "as_of": rep["as_of"],
+                # 价格取 K 线收盘：仪表盘里的买点、止损都由它算出，两处必须一致
+                "price": round(feats["close"], 3 if feats["close"] < 1 else 2), "change_pct": r.get("change_pct"),
+                "as_of": rep["as_of"],
                 "pe": _r(r.get("pe")), "pb": _r(r.get("pb")), "total_mv": r.get("total_mv"),
                 "amount": r.get("amount"), "turnover": _r(r.get("turnover")),
                 "score": final, "screen_score": s_score, "signal_score": round(feats["signal_score"], 1),

@@ -259,6 +259,8 @@ class RunnerTest(unittest.TestCase):
             self.assertIn(p["dashboard"]["signal"], ("buy", "watch"))
             self.assertTrue(p["dashboard"]["checklist"])
             self.assertNotIn("_rep", p)
+            self.assertAlmostEqual(p["price"], p["features"]["ma5"] * (1 + p["features"]["bias_ma5"] / 100), delta=0.02,
+                                   msg="显示的价格与仪表盘用的收盘价一致")
         self.assertLessEqual(scores, sorted(scores, reverse=True) or scores)
         self.assertEqual(len(payload["etfs"]["ranking"]), len(F.ETF_POOL))
         self.assertEqual([g["key"] for g in payload["funds"]["groups"]], [g[0] for g in F.FUND_PLAN])
