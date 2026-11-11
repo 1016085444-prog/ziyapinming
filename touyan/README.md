@@ -242,6 +242,7 @@ python3 make_package.py        # 生成 dist/touyan-日期.zip，约 170 KB
 把这个 ZIP 用微信、网盘发给对方即可。对方解压后 Windows 双击 `start.bat`、Mac 双击
 `start-mac.command`；包里附了一份写给对方看的 `使用说明.txt`（装 Python、系统拦截怎么放行、
 怎么填 Key、怎么更新）。每个人在自己的「设置」里填自己的 API Key，模型费用各付各的。
+文件夹要放在不会同步到云盘的位置（Mac 的个人文件夹、Windows 的 C:\touyan 之类），放进 iCloud / OneDrive 同步的桌面或文稿里，几百 MB 的依赖和数据库会被反复同步，可能导致打不开。
 
 **不要把自己电脑上的 `touyan` 文件夹直接压缩发出去**：`data/settings.json` 里是你的 API Key，
 发出去别人就能用你的额度；`.venv/` 是本机装的依赖，几百 MB，换一台电脑也用不了。
