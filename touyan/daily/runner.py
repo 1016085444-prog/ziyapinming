@@ -405,7 +405,7 @@ def commentary(payload: dict) -> tuple[str | None, str]:
 def as_of_label(as_of: str, now: datetime, intraday: bool) -> str:
     """数据日期说人话。工作日里拿到的不是今天的数据，要直接告诉用户。"""
     if intraday:
-        return "上一个交易日收盘（今天还没收盘，收盘后会更新）"
+        return "上一个交易日收盘：今天还没收盘，收盘后会更新"
     if as_of == now.date().isoformat():
         return "今天收盘"
     if now.weekday() >= 5 or (now.hour, now.minute) < (9, 15):
