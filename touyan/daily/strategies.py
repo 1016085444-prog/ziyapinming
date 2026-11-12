@@ -20,6 +20,7 @@ STRATEGIES: dict[str, dict] = {
                     "activity_ideal_volume_ratio": 2.0, "activity_ideal_turnover_rate": 4.0,
                     "stability_hot_change_pct": 7.0},
         "risk": {"chase_change_pct": 8.0, "abnormal_volume_ratio": 6.0, "high_turnover_rate": 15.0},
+        "hold": {"min": 10, "max": 30, "label": "2–6 周"},   # 持有期（交易日）
         "pool": 30,
     },
     "value": {
@@ -35,6 +36,7 @@ STRATEGIES: dict[str, dict] = {
                     "stability_hot_change_pct": 4.5, "stability_high_turnover_rate": 8.0,
                     "stability_high_volume_ratio": 4.0},
         "risk": {"chase_change_pct": 5.5, "abnormal_volume_ratio": 4.5, "high_turnover_rate": 10.0},
+        "hold": {"min": 20, "max": 60, "label": "1–3 个月"},
         "pool": 30,
     },
     "trend": {
@@ -53,6 +55,7 @@ STRATEGIES: dict[str, dict] = {
                     "stability_max_drawdown_floor_pct": -10.0, "stability_high_atr_pct": 5.5},
         "risk": {"chase_change_pct": 6.5, "abnormal_volume_ratio": 4.5, "high_turnover_rate": 12.0,
                  "weak_signal_score": 60.0},
+        "hold": {"min": 5, "max": 15, "label": "1–3 周"},
         "pool": 45,                    # 日 K 条件会刷掉一大半，初选多留一些
     },
 }

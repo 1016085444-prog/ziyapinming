@@ -1177,7 +1177,8 @@
     var head = h('div', { class: 'row daily-head' },
       h('div', null, h('h1', { class: 'inst-name' }, '每日精选'),
         h('div', { class: 'small muted' }, p
-          ? (archived ? '历史记录 · ' : '') + '数据日期 ' + p.as_of + ' · ' + p.strategy.label + ' · 生成于 ' + p.created_at + (p.intraday ? ' · 盘中数据，收盘后可能变化' : '')
+          ? (archived ? '历史记录 · ' : '') + '数据日期 ' + p.as_of + (p.as_of_label ? '（' + p.as_of_label + '）' : '') + ' · ' +
+            p.strategy.label + ' · 生成于 ' + p.created_at + (p.intraday ? ' · 盘中数据，收盘后可能变化' : '')
           : '收盘后扫一遍全市场，挑出值得关注的股票、ETF 和场外基金')),
       h('span', { class: 'spacer' }),
       archived ? h('a', { class: 'btn', href: '#/daily' }, '回到最新') : null,
@@ -1246,10 +1247,43 @@
       h('div', { class: 'pick-advice small' }, h('div', null, h('strong', null, '空仓者：'), d.advice.no_position),
         h('div', null, h('strong', null, '持仓者：'), d.advice.has_position)),
       d.risks.length ? h('div', { class: 'pick-advice small' }, h('div', null, h('strong', null, '风险：'), d.risks.join('；'))) : null,
+      planBlock(d.plan),
       h('div', { class: 'row' }, h('a', { class: 'btn btn-sm', href: href }, '完整体检'),
         h('a', { class: 'btn btn-sm', href: href + '?tab=ai' }, 'AI 深度分析'), h('span', { class: 'spacer' }),
         h('span', { class: 'small muted' }, '因子 ' + s.screen_score.toFixed(0) + ' · 技术 ' + s.signal_score.toFixed(0) +
           ' · 体检 ' + s.quant_score.toFixed(0) + (s.penalty ? ' · 风险扣 ' + s.penalty : ''))));
+  }
+
+  function planStat(label, value, cls) {
+    return h('div', { class: 'lv' }, h('div', { class: 'small muted' }, label), h('div', { class: 'lvv ' + (cls || '') }, value));
+  }
+
+  function planHistoryText(hist) {
+    if (!hist || !hist.trades) return '过去几年没有出现过足够的类似买点，没法参照。';
+    return '过去 ' + hist.years + ' 年出现类似买点 ' + hist.trades + ' 次，照这个计划操作：平均每次 ' + F.pct(hist.avg, 1) +
+      '，赚钱的占 ' + Math.round(hist.win_rate * 100) + '%；到目标 ' + hist.target_hits + ' 次、止损 ' + hist.stop_hits +
+      ' 次、到期卖出 ' + hist.time_exits + ' 次，平均拿 ' + Math.round(hist.avg_days) + ' 个交易日。' +
+      (hist.trades < 5 ? '样本太少，只能看个大概。' : '');
+  }
+
+  function planBlock(plan) {
+    if (!plan) return null;
+    return h('div', { class: 'plan-box' },
+      h('div', { class: 'row' }, h('strong', null, '持有计划'),
+        h('span', { class: 'small muted' }, '买入价按 ' + plan.entry + ' 算，一般持有 ' + plan.hold_label + '（最多 ' + plan.hold_max + ' 个交易日）')),
+      h('div', { class: 'plan-stats' }, planStat('目标涨幅', '+' + plan.target_pct + '%', 'up'),
+        planStat('最多亏', '−' + plan.stop_pct + '%', 'down'), planStat('保本线', '+' + plan.breakeven_pct + '%'),
+        planStat('最长持有', plan.hold_max + ' 个交易日')),
+      h('ul', { class: 'plan-rules small' }, plan.rules.map(function (r) { return h('li', null, r); })),
+      h('div', { class: 'small muted' }, '历史参照：' + planHistoryText(plan.history) + '这是过去的统计，不是预测。'));
+  }
+
+  function rotationText(hst) {
+    if (!hst) return null;
+    return '按这套规则从 ' + hst.start + ' 走到 ' + hst.end + '（约 ' + hst.years + ' 年）：累计 ' + F.pct(hst.total, 1) +
+      (hst.cagr !== null && hst.cagr !== undefined ? '，年化 ' + F.pct(hst.cagr, 1) : '') + '，最大回撤 ' + F.pct(hst.max_drawdown, 1) +
+      '；同期沪深300 ' + F.pct(hst.bench_total, 1) + '、最大回撤 ' + F.pct(hst.bench_max_drawdown, 1) +
+      (hst.avg_hold_weeks ? '；每只平均拿 ' + hst.avg_hold_weeks.toFixed(1) + ' 周' : '') + '。未计滑点，过去不代表以后。';
   }
 
   function dailyStocks(st) {
@@ -1281,12 +1315,22 @@
     });
     var chips = e.picks.map(function (x) { return h('a', { class: 'badge accent', href: '#/a/' + encodeURIComponent(x.key) + '?kind=etf' }, x.name); });
     if (e.safe) chips.push(h('a', { class: 'badge', href: '#/a/' + encodeURIComponent(e.safe.key) + '?kind=etf' }, '防守：' + e.safe.name));
+    var plan = e.plan ? h('div', { class: 'plan-box', style: { marginTop: '12px' } }, h('strong', null, '怎么拿'),
+      h('ul', { class: 'plan-rules small' }, e.plan.rules.map(function (r) { return h('li', null, r); })),
+      e.plan.history ? h('div', { class: 'small muted' }, '历史参照：' + rotationText(e.plan.history)) : null) : null;
     return card('ETF 动量轮动', '按近 60 / 20 / 120 日涨幅排名；只选近 60 日上涨、且站上 20 日线的',
-      h('p', null, e.note + '。'), chips.length ? h('div', { class: 'sector-row' }, chips) : null,
+      h('p', null, e.note + '。'), chips.length ? h('div', { class: 'sector-row' }, chips) : null, plan,
       rows.length ? h('div', { class: 'table-wrap', style: { marginTop: '12px' } }, h('table', { class: 'tbl' },
         h('thead', null, h('tr', null, ['ETF', '类别', '近20日', '近60日', '近120日', '站上20日线', '120日最大回撤', '动量分'].map(function (x, i) {
           return h('th', { class: i >= 2 ? 'n' : '' }, x);
         }))), h('tbody', null, rows))) : null);
+  }
+
+  function fundHistoryText(hst, horizon) {
+    if (!hst) return '';
+    return '历史参照：过去 ' + hst.years + ' 年里任意一天买入、持有满' + (horizon >= 240 ? '一年' : '半年') + '，赚钱的概率 ' +
+      Math.round(hst.win_rate * 100) + '%，收益中位数 ' + F.pct(hst.median, 1) + '（运气差的 10% 情况 ' + F.pct(hst.p10, 1) +
+      '，运气好的 10% 情况 ' + F.pct(hst.p90, 1) + '）。';
   }
 
   function dailyFunds(fs) {
@@ -1303,8 +1347,11 @@
               kv('近3年最大回撤', F.pct(x.max_drawdown_3y, 1)), kv('夏普（3年）', F.num(x.sharpe_3y)),
               kv('规模', x.scale ? F.num(x.scale, 1) + ' 亿' : '—'), kv('申购费', x.fee || '—')),
             h('div', { class: 'procon' }, x.pros.map(function (t) { return h('div', { class: 'item' }, h('span', { class: 'mark ok-mark' }, '✓'), t); }),
-              x.cons.map(function (t) { return h('div', { class: 'item' }, h('span', { class: 'mark bad-mark' }, '!'), t); })));
+              x.cons.map(function (t) { return h('div', { class: 'item' }, h('span', { class: 'mark bad-mark' }, '!'), t); })),
+            x.plan ? h('div', { class: 'small muted' }, '持有：' + x.plan.hold_label + '。' + fundHistoryText(x.plan.history, x.plan.horizon_days)) : null);
         }) : h('div', { class: 'small muted' }, '今天没有基金通过全部检查。'),
+        g.picks.length && g.picks[0].plan ? h('div', { class: 'plan-box', style: { marginTop: '8px' } }, h('strong', null, '怎么拿'),
+          h('ul', { class: 'plan-rules small' }, g.picks[0].plan.rules.map(function (r) { return h('li', null, r); }))) : null,
         g.rejected.length ? h('div', { class: 'small muted', style: { marginTop: '6px' } }, '体检没通过：' +
           g.rejected.map(function (x) { return x.name + '（' + x.reason + '）'; }).join('；')) : null);
     }));

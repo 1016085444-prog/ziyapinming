@@ -27,6 +27,9 @@ FUND_PLAN = [
     ("qdii", "QDII（海外）", ("qdii",), 1),
 ]
 LOCKUP_RE = re.compile(r"持有|定开|封闭|定期开放|养老目标")
+# 场外基金怎么拿：(建议持有多久, 用来算历史参照的持有交易日数)
+FUND_HOLD = {"equity": ("至少 1 年，最好 3 年以上", 250), "index": ("至少 1 年", 250),
+             "bond": ("至少半年", 125), "qdii": ("至少 1 年", 250)}
 ACTIVE_TYPES = ("gp", "hh")
 
 
@@ -63,9 +66,9 @@ def fund_perf_scores(rows: list[dict]) -> list[dict]:
     seen, out = set(), []
     for r in sorted(rows, key=lambda x: -x["perf_score"]):
         key = share_class_key(r["name"])
-        if key in seen:
+        if key in seen or r["code"] in seen:
             continue
-        seen.add(key)
+        seen.update((key, r["code"]))
         out.append(r)
     return out
 
@@ -117,6 +120,24 @@ ETF_POOL = [
     ("513180", "恒生科技ETF", "海外"), ("513050", "中概互联网ETF", "海外"), ("518880", "黄金ETF", "商品"),
 ]
 SAFE_ETF = ("511010", "国债ETF", "防守")
+ETF_RULES = [
+    "每周看一次排名（这个页面每天都会更新）",
+    "卖出：跌出动量前 3 名，或者不再满足「近 60 日上涨、站上 20 日线」，就换成新的前 3 名",
+    "一只都不合格时，换成国债 ETF 防守，等有合格的再换回来",
+]
+
+
+def fund_plan(group_key: str, ft: str, max_drawdown_3y: float | None, history: dict | None) -> dict:
+    label, horizon = FUND_HOLD.get(group_key, ("至少 1 年", 250))
+    rules = [f"计划持有{label}，短期涨跌不用天天看；持有不满 7 天卖出要交 1.5% 的惩罚性赎回费",
+             "基金经理换人、规模跌破 2 亿、或者近 1 年业绩掉到同类后一半，就重新评估、考虑换一只"]
+    if group_key == "bond":
+        rules.append("下跌超过 2% 时停下来复查：债券基金平时波动很小，跌这么多通常是出了问题")
+    elif max_drawdown_3y is not None:
+        rules.append(f"从买入价下跌超过 {abs(max_drawdown_3y) * 100:.0f}%（它近 3 年最大的一次回撤）时停下来复查，"
+                     "不是一跌就卖")
+    rules.append("赚到自己定的目标（比如年化 8%–10%）可以分批赎回，落袋为安")
+    return {"hold_label": label, "horizon_days": horizon, "rules": rules, "history": history}
 
 
 def _ret(closes: list[float], n: int) -> float | None:

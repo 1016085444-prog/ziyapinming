@@ -383,3 +383,131 @@ class DailyAPITest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DiversifyBucketTest(unittest.TestCase):
+    def test_banks_without_industry_only_one(self):
+        names = ["招商银行", "工商银行", "成都银行", "中信证券", "贵州茅台", "宁波银行", "长江电力"]
+        cands = [{"code": str(i), "name": n, "industry": "", "score": 90 - i} for i, n in enumerate(names)]
+        picked = [c["name"] for c in S.diversify(cands, 4)]
+        self.assertEqual(picked, ["招商银行", "贵州茅台", "长江电力", "工商银行"],
+                         "银行、券商同属金融：先各大类一只，凑不够才放宽")
+        self.assertEqual(S.bucket_of("", "平安银行"), "金融")
+        self.assertEqual(S.bucket_of("电网设备"), "新能源")
+        self.assertEqual(S.bucket_of("电力行业"), "公用事业")
+        self.assertEqual(S.bucket_of("航天航空"), "军工")
+        self.assertEqual(S.bucket_of("航空机场"), "交通运输")
+        self.assertEqual(S.bucket_of("化学制药"), "医药")
+        self.assertEqual(S.bucket_of("工程机械"), "机械设备")
+        self.assertEqual(S.bucket_of("旅游酒店"), "大消费")
+        self.assertEqual(S.bucket_of("包装材料"), "包装材料", "认不出的大类就按行业本身")
+
+    def test_fill_industries(self):
+        from market import eastmoney
+        payload = {"data": {"diff": [{"f12": "600036", "f14": "招商银行", "f100": "银行"},
+                                     {"f12": "600519", "f14": "贵州茅台", "f100": "-"}]}}
+        self.assertEqual(eastmoney.parse_industries(payload), {"600036": "银行"})
+        rows = [stock_row("600036", "招商银行", industry=""), stock_row("000001", "平安银行", market="SZ", industry=""),
+                stock_row("600519", "贵州茅台", industry="酿酒行业")]
+        with mock.patch.object(R.eastmoney, "industries", return_value={"600036": "银行"}) as call:
+            self.assertEqual(R.fill_industries(rows), "")
+        self.assertEqual(call.call_args.args[0], ["1.600036", "0.000001"], "只查缺的，沪市 1. 深市 0.")
+        self.assertEqual([r["industry"] for r in rows], ["银行", "银行", "酿酒行业"])
+        rows = [stock_row("601998", "中信银行", industry="")]
+        with mock.patch.object(R.eastmoney, "industries", side_effect=R.SourceError("断网")):
+            self.assertIn("行业", R.fill_industries(rows))
+        self.assertEqual(rows[0]["industry"], "银行")
+
+
+class PlanTest(unittest.TestCase):
+    def test_all_targets_on_steady_rise(self):
+        bars = line_bars([10 * 1.005 ** k for k in range(200)])
+        h = __import__("daily.backtest").backtest.plan_history(bars, 2.0, 3.0, 10)
+        self.assertGreater(h["trades"], 10)
+        self.assertEqual((h["target_hits"], h["win_rate"], h["avg_days"]), (h["trades"], 1.0, 4.0))
+        self.assertAlmostEqual(h["avg"], 0.02)
+
+    def test_time_exit(self):
+        from daily.backtest import plan_history
+        h = plan_history(line_bars([10 * 1.001 ** k for k in range(200)]), 5.0, 3.0, 10)
+        self.assertEqual(h["time_exits"], h["trades"])
+        self.assertAlmostEqual(h["avg"], 1.001 ** 10 - 1, places=6)
+
+    def test_breakeven_limits_loss(self):
+        from daily.backtest import plan_history
+        prices = [30 - k * 0.05 for k in range(60)]                       # 先跌：均线空头，没有买点
+        prices += [prices[-1] * 1.003 ** k for k in range(1, 23)]          # 慢涨：出现买点，涨过 +2% 但没到 +5%
+        prices += [prices[-1] * 0.98 ** k for k in range(1, 14)]           # 再连跌
+        bars = line_bars(prices)
+        plain = plan_history(bars, 5.0, 3.0, 30)
+        guarded = plan_history(bars, 5.0, 3.0, 30, breakeven_pct=2.0)
+        self.assertEqual((plain["trades"], plain["stop_hits"]), (1, 1))
+        self.assertLess(plain["worst"], -0.03)
+        self.assertEqual(guarded["stop_hits"], 1)
+        self.assertGreater(guarded["worst"], -0.03, "涨过保本线后止损提到买入价，亏得比原止损少")
+        self.assertEqual(plan_history(line_bars([30 - k * 0.05 for k in range(200)]), 5, 3, 10)["trades"], 0)
+
+    def test_dashboard_plan(self):
+        calm = line_bars([10 + i * 0.03 + 0.25 * math.sin(i / 2.5) for i in range(200)])
+        f = S.daily_features(calm)
+        close = calm[-1].close
+        rep = {"scores": {"composite": 65.0, "rating": {"label": "增持"}, "pros": [], "cons": []},
+               "levels": {"resistances": [{"price": close * 1.6, "label": "波段高点（2025-01-02）"}]}}
+        d = S.dashboard(stock_row(price=close), f, rep, 72, [], {"min": 5, "max": 15, "label": "1–3 周"})
+        plan = d["plan"]
+        self.assertEqual(len(plan["rules"]), 4)
+        self.assertLess(plan["target_pct"], 60, "15 天内够不着的前高要按波动幅度封顶")
+        self.assertGreater(plan["target_pct"], 0)
+        self.assertGreater(plan["stop_pct"], 0)
+        self.assertAlmostEqual(plan["breakeven_pct"], round(plan["target_pct"] / 2, 1))
+
+
+class HoldingStatsTest(unittest.TestCase):
+    def test_rolling_stats(self):
+        from daily.backtest import rolling_stats
+        s = rolling_stats(walk(800, 1.0, 0.0008, 0.005, seed=2, nav=True), 250)
+        self.assertEqual(s["windows"], 550)
+        self.assertLessEqual(s["p10"], s["median"])
+        self.assertLessEqual(s["median"], s["p90"])
+        self.assertIsNone(rolling_stats(walk(200, 1.0, seed=2, nav=True), 250))
+
+    def test_rotation_backtest(self):
+        from daily.backtest import rotation_backtest
+        n = 420
+        series = {"A": line_bars([1 * 1.003 ** k for k in range(n)]), "B": line_bars([1 * 1.0015 ** k for k in range(n)]),
+                  "C": line_bars([1.0] * n), "D": line_bars([2 * 0.998 ** k for k in range(n)])}
+        bench = line_bars([3000 * 1.0005 ** k for k in range(n)])
+        res = rotation_backtest(series, bench, top_n=2)
+        self.assertGreater(res["total"], res["bench_total"])
+        self.assertEqual(res["switches"], 0, "一直是 A、B 两只，不用换")
+        self.assertGreater(res["max_drawdown"], -0.002, "一路上涨，几乎没有回撤")
+        falling = {k: line_bars([2 * 0.998 ** i for i in range(n)]) for k in "ABC"}
+        flat = rotation_backtest(falling, bench, top_n=2)
+        self.assertAlmostEqual(flat["total"], 0.0, places=6, msg="一只都不合格、又没有防守品种时空仓")
+
+
+class RunnerPlanTest(RunnerTest):
+    def test_plans_and_labels(self):
+        with mock.patch.object(R.config, "llm_ready", return_value=(False, "")):
+            payload, _ = self.run_once(strategy="trend")
+        self.assertTrue(payload["as_of_label"])
+        for p in payload["stocks"]["picks"]:
+            plan = p["dashboard"]["plan"]
+            self.assertEqual((plan["hold_min"], plan["hold_max"]), (5, 15))
+            self.assertIn("trades", plan["history"])
+        self.assertIn("rules", payload["etfs"]["plan"])
+        self.assertIsNotNone(payload["etfs"]["plan"]["history"])
+        fund = next(f for g in payload["funds"]["groups"] for f in g["picks"])
+        self.assertEqual(fund["plan"]["horizon_days"] in (125, 250), True)
+        self.assertIsNotNone(fund["plan"]["history"])
+        md = T.to_markdown(payload)
+        for part in ("持有计划", "历史参照", "怎么拿"):
+            self.assertIn(part, md)
+
+    def test_as_of_label(self):
+        now = datetime(2026, 11, 11, 22, 0, tzinfo=R.BJ)
+        self.assertEqual(R.as_of_label("2026-11-11", now, False), "今天收盘")
+        self.assertEqual(R.as_of_label("2026-11-11", now, True), "今天盘中，还没收盘")
+        self.assertIn("不是今天的数据", R.as_of_label("2026-11-10", now, False), "工作日晚上还拿到昨天的数据要明说")
+        self.assertEqual(R.as_of_label("2026-11-13", datetime(2026, 11, 14, 10, 0, tzinfo=R.BJ), False), "最近一个交易日收盘")
+        self.assertEqual(R.as_of_label("2026-11-10", datetime(2026, 11, 11, 8, 0, tzinfo=R.BJ), False), "最近一个交易日收盘")

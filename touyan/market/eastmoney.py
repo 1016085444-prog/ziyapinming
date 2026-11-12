@@ -141,6 +141,24 @@ def names(secids: list[str]) -> dict[str, tuple[str, float | None]]:
     return {str(d.get("f12")): (str(d.get("f14") or ""), num(d.get("f3"))) for d in diff if d.get("f12")}
 
 
+def parse_industries(payload: dict) -> dict[str, str]:
+    diff = ((payload or {}).get("data") or {}).get("diff") or []
+    if isinstance(diff, dict):
+        diff = list(diff.values())
+    return {str(d["f12"]): str(d["f100"]) for d in diff
+            if d.get("f12") and d.get("f100") not in (None, "-", "")}
+
+
+def industries(secids: list[str]) -> dict[str, str]:
+    """一次查多只股票的所属行业（东方财富行业分类），每批 50 只。返回 {代码: 行业}。"""
+    out: dict[str, str] = {}
+    for i in range(0, len(secids), 50):
+        params = {"fltt": "2", "invt": "2", "fields": "f12,f14,f100", "secids": ",".join(secids[i:i + 50]),
+                  "ut": ULIST_UT}
+        out.update(parse_industries(net.get_json(ULIST_URL, params=params, headers=REFERER)))
+    return out
+
+
 # ── 搜索 ───────────────────────────────────────────────────────
 
 def search(text: str, count: int = 10) -> list[Instrument]:

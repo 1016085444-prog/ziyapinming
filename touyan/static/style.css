@@ -395,11 +395,18 @@ a.badge:hover { color: var(--text); }
 .lv .lvv { font-weight: 650; font-variant-numeric: tabular-nums; }
 .pick-advice { display: grid; gap: 4px; color: var(--text-2); }
 .fund-group + .fund-group { margin-top: 18px; }
+.plan-box { background: var(--surface-2); border-radius: 10px; padding: 10px 12px; display: grid; gap: 8px; }
+.plan-box .lv { background: var(--surface); }
+.plan-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.plan-rules { margin: 0; padding-left: 18px; display: grid; gap: 2px; color: var(--text-2); }
+.lvv.up { color: var(--up-text); }
+.lvv.down { color: var(--down-text); }
 .fund-group h3 { margin: 0 0 4px; font-size: 15px; }
 .fund-pick { border-top: 1px solid var(--grid); padding: 10px 0; display: grid; gap: 8px; }
 .tbl tr.hl td { background: var(--accent-soft); }
 @media (max-width: 640px) {
   .pick { padding: 12px; }
   .pick-levels { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .plan-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .ck { grid-template-columns: 16px 76px minmax(0, 1fr); }
 }

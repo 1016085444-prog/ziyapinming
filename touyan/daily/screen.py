@@ -307,16 +307,53 @@ def final_score(screen: float, signal: float, quant: float | None, penalty: floa
     return round(clip(0.45 * screen + 0.25 * signal + 0.30 * q - penalty, 0, 100), 1)
 
 
+# 行业归到大类：同一大类只选一只。顺序有讲究——先匹配的先归类（「电网设备」归新能源而不是公用事业，
+# 「航天航空」归军工而不是交通，「工程机械」归机械而不是基建）。思路来自 daily_stock_analysis 的组合分散规则。
+BUCKETS = (
+    ("金融", ("银行", "证券", "券商", "保险", "多元金融", "信托", "期货")),
+    ("医药", ("医药", "医疗", "生物", "中药", "制药", "疫苗")),
+    ("食品饮料", ("酿酒", "白酒", "啤酒", "食品", "饮料", "乳", "调味")),
+    ("大消费", ("家电", "零售", "百货", "旅游", "酒店", "餐饮", "美容", "纺织", "服装", "家居")),
+    ("半导体电子", ("半导体", "电子", "元件", "芯片", "光学")),
+    ("新能源", ("电池", "光伏", "风电", "储能", "能源金属", "电网", "电源设备", "电机")),
+    ("通信计算机", ("通信", "计算机", "软件", "互联网", "游戏", "传媒", "文化")),
+    ("资源周期", ("钢铁", "煤炭", "有色", "金属", "石油", "化工", "化学", "化纤", "塑料", "橡胶", "建材", "水泥", "玻璃")),
+    ("公用事业", ("电力", "燃气", "水务", "环保", "公用")),
+    ("军工", ("航天", "军工", "船舶", "国防")),
+    ("交通运输", ("航运", "港口", "航空", "机场", "铁路", "公路", "物流")),
+    ("汽车", ("汽车", "零部件")),
+    ("机械设备", ("机械", "设备", "仪器", "仪表")),
+    ("地产基建", ("房地产", "建筑", "装修", "工程")),
+    ("农业", ("农牧", "饲料", "养殖", "种植", "渔业", "农业")),
+)
+
+
+def guess_industry(name: str) -> str:
+    """取不到行业时，从名字猜最常见的几类：银行、券商、保险的名字几乎都带这几个字。"""
+    for word, industry in (("银行", "银行"), ("证券", "证券"), ("保险", "保险"), ("人寿", "保险")):
+        if word in (name or ""):
+            return industry
+    return ""
+
+
+def bucket_of(industry: str, name: str = "") -> str:
+    industry = industry or guess_industry(name)
+    for bucket, words in BUCKETS:
+        if any(w in industry for w in words):
+            return bucket
+    return industry
+
+
 def diversify(cands: list[dict], n: int) -> list[dict]:
-    """按最终分取前 n 只，同一行业只留一只；凑不够再放宽。"""
+    """按最终分取前 n 只，同一大类（金融、医药、新能源……）只留一只；凑不够再放宽。"""
     picked, seen = [], set()
     for c in cands:
-        ind_name = c.get("industry") or ""
-        if ind_name and ind_name in seen:
+        bucket = c.get("bucket") or bucket_of(c.get("industry") or "", c.get("name") or "")
+        if bucket and bucket in seen:
             continue
         picked.append(c)
-        if ind_name:
-            seen.add(ind_name)
+        if bucket:
+            seen.add(bucket)
         if len(picked) == n:
             return picked
     for c in cands:
@@ -356,7 +393,8 @@ def _merge_notes(first: list[str], extra: list[str], limit: int = 4) -> list[str
     return out[:limit]
 
 
-def dashboard(r: dict, feats: dict, report: dict | None, score: float, risk_notes: list[str]) -> dict:
+def dashboard(r: dict, feats: dict, report: dict | None, score: float, risk_notes: list[str],
+              hold: dict | None = None) -> dict:
     close = feats["close"]
     bias = feats["bias_ma5"]
     checks = []
@@ -424,6 +462,11 @@ def dashboard(r: dict, feats: dict, report: dict | None, score: float, risk_note
         highs.append(lv["high_52w"])
     resist = sorted({x for x in highs if x > close * 1.01})
     target = next((t for t in resist if (t - entry) >= 1.5 * (entry - stop)), resist[-1] if resist else close + 3 * atr)
+    # 持有期内够不着的目标没有意义：按近 20 日波动，最多算 1.5 倍「持有期内一个标准差」的涨幅
+    hold = hold or {"min": 10, "max": 30, "label": "2–6 周"}
+    if feats.get("volatility_20d"):
+        reach = feats["volatility_20d"] / 100 / math.sqrt(252) * math.sqrt(hold["max"]) * 1.5
+        target = min(target, entry * (1 + max(reach, 0.03)))
     target = _price(target)
     rr = round((target - entry) / (entry - stop), 1) if entry > stop else None
     room_ok = rr is None or rr >= 1.0
@@ -453,11 +496,32 @@ def dashboard(r: dict, feats: dict, report: dict | None, score: float, risk_note
         no_pos = f"先不买，等回踩 {second} 附近企稳、或乖离率回到 5% 以内再看"
         has_pos = f"持有观察，跌破 {stop} 减仓"
 
+    plan = holding_plan(entry, target, stop, hold)
     return {
         "signal": signal, "signal_label": label, "one_sentence": one, "checklist": checks,
         "levels": {"ideal_buy": ideal, "secondary_buy": second, "stop_loss": stop, "target": target,
                    "reward_risk": rr},
+        "plan": plan,
         "advice": {"no_position": no_pos, "has_position": has_pos},
         "risks": _merge_notes(risk_notes, [c["text"] for c in ((report or {}).get("scores", {}).get("cons") or [])[:3]]),
         "highlights": [c["text"] for c in ((report or {}).get("scores", {}).get("pros") or [])[:3]],
+    }
+
+
+def holding_plan(entry: float, target: float, stop: float, hold: dict) -> dict:
+    """买了以后怎么办：什么时候止盈、止损、保本、到期卖。四条规则和「历史参照」回测用的完全一样。"""
+    target_pct = (target / entry - 1) * 100
+    stop_pct = (1 - stop / entry) * 100
+    be_pct = round(target_pct / 2, 1)
+    be_price = _price(entry * (1 + be_pct / 100))
+    return {
+        "entry": _price(entry), "target": target, "target_pct": round(target_pct, 1),
+        "stop": stop, "stop_pct": round(stop_pct, 1), "breakeven_pct": be_pct,
+        "hold_min": hold["min"], "hold_max": hold["max"], "hold_label": hold["label"],
+        "rules": [
+            f"止盈：涨到 {target}（+{target_pct:.1f}%）就卖",
+            f"止损：收盘跌破 {stop}（−{stop_pct:.1f}%）就卖，不抱幻想",
+            f"保本：涨过 {be_price}（+{be_pct:.1f}%）以后，止损提到买入价 {_price(entry)}，这笔不再亏钱",
+            f"到期：持有满 {hold['max']} 个交易日（约 {hold['label']}）还没到目标，按收盘价卖出",
+        ],
     }
