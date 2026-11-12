@@ -78,11 +78,15 @@ def regime(bench: list[Bar], br: dict | None) -> dict:
     return {"label": label, "score": score, "notes": notes, "advice": REGIME_ADVICE[label]}
 
 
-def index_quotes(router) -> tuple[list[dict], list[str]]:
+def index_closes(router, partial: str | None = None) -> tuple[list[dict], list[str]]:
+    """各指数最近一个完整交易日的收盘（不用实时报价：每日精选一律按收盘算）。"""
     def one(inst: Instrument):
-        q, _ = router.quote(inst)
-        return {"name": inst.name, "code": inst.code, "key": inst.key, "price": q.price,
-                "change_pct": q.change_pct}
+        bars, _ = router.series(inst, 260)
+        if partial and bars and bars[-1].date == partial:
+            bars = bars[:-1]
+        last, prev = bars[-1], bars[-2]
+        return {"name": inst.name, "code": inst.code, "key": inst.key, "price": round(last.close, 2),
+                "change_pct": round((last.close / prev.close - 1) * 100, 2), "date": last.date}
 
     out, warnings = [], []
     with ThreadPoolExecutor(max_workers=5) as pool:
@@ -90,13 +94,14 @@ def index_quotes(router) -> tuple[list[dict], list[str]]:
         for inst, fut in futures:
             try:
                 out.append(fut.result())
-            except SourceError as exc:
+            except (SourceError, IndexError) as exc:
                 warnings.append(f"{inst.name}行情取不到：{exc}")
     return out, warnings
 
 
-def overview(router, rows: list[dict], boards: list[dict], bench: list[Bar]) -> dict:
-    indices, warnings = index_quotes(router)
+def overview(router, rows: list[dict], boards: list[dict], bench: list[Bar], partial: str | None = None) -> dict:
+    """rows 为空表示没有完整的收盘快照（盘中倒推的数据不能算涨跌家数），这时不显示涨跌家数。"""
+    indices, warnings = index_closes(router, partial)
     br = breadth(rows) if rows else None
     return {
         "indices": indices,

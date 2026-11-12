@@ -52,7 +52,7 @@ def to_markdown(p: dict) -> str:
     out = [f"# 每日精选 · {p['as_of']}{label} · {p['strategy']['label']}", "",
            f"> {p['disclaimer']}", ""]
     if p.get("intraday"):
-        out += ["> ⚠️ 生成时还没收盘，用的是盘中数据，收盘后结果可能变化。", ""]
+        out += ["> 生成时今天还没收盘，用的是上一个交易日的收盘数据。", ""]
     reg = m["regime"]
     out += ["## 大盘", f"- 市场温度：**{reg['label']}**（{'；'.join(reg['notes'])}）。{reg['advice']}"]
     if m["indices"]:
@@ -71,8 +71,11 @@ def to_markdown(p: dict) -> str:
 
     f = st["funnel"]
     out += ["", f"## 精选股票（全市场 {f['universe']} → 条件过滤 {f['passed_hard']} → 初选 {f['pool']} → 入选 {f['picked']}）"]
+    if f.get("source"):
+        out.append(f"全市场数据：{f['source']}")
     if not st["picks"]:
-        out.append("今天没有股票同时满足全部条件。")
+        reasons = {**f.get("dropped", {}), **f.get("daily_dropped", {})}
+        out.append("这次没有股票同时满足全部条件。主要原因：" + "；".join(f"{k} {v} 只" for k, v in list(reasons.items())[:5]))
     for i, s in enumerate(st["picks"], 1):
         d = s["dashboard"]
         icon = "🟢" if d["signal"] == "buy" else "🟡"

@@ -36,6 +36,64 @@ def beijing_now() -> datetime:
     return datetime.now(BJ)
 
 
+# ── 按收盘算 ──────────────────────────────────────────────────────
+# 每日精选一律用完整交易日的收盘数据。交易日收盘前（9:15 集合竞价起到 15:00）生成时，
+# 用上一个交易日的收盘：K 线去掉今天还没走完的那根；全市场快照优先用上次收盘后存下的，
+# 没有的话用实时行情倒推到昨天收盘（估值按昨收折算，成交额、涨跌幅改用 K 线上昨天的数据复核）。
+
+EOD_KEY = "universe:a-share:eod"
+DERIVED_NOTE = ("今天还没收盘：全市场数据按实时行情倒推到上一交易日收盘，估值按昨天的收盘价折算；"
+                "成交额、涨跌幅等今天还没走完的数据不参与初筛，改用 K 线上昨天的数据复核。"
+                "软件在收盘后开着的话会自动存下当天的完整数据，下次盘中生成就不用倒推了。")
+
+
+def session_intraday(now: datetime, bench: list) -> bool:
+    """今天的交易是不是还没走完（数据里有今天的半根 K 线，或者在集合竞价到刚开盘之间）。"""
+    if now.weekday() >= 5:
+        return False
+    t = (now.hour, now.minute)
+    if bench and bench[-1].date == now.date().isoformat():
+        return t < (15, 0)
+    return (9, 15) <= t < (9, 35)          # 之后还没有今天的 K 线，多半是节假日休市
+
+
+def drop_partial(bars: list, partial: str | None) -> list:
+    return bars[:-1] if partial and bars and bars[-1].date == partial else bars
+
+
+def to_prev_close(r: dict) -> dict:
+    """实时快照倒推到昨天收盘：价格、市值、市盈率、市净率都按昨收折算；今天的成交和涨跌去掉。"""
+    out = {k: v for k, v in r.items() if k not in ("amount", "turnover", "volume_ratio", "change_pct")}
+    chg = r.get("change_pct")
+    if chg is not None and r.get("price") and chg > -100:
+        f = 1 / (1 + chg / 100)
+        out["price"] = r["price"] * f
+        for k in ("total_mv", "float_mv", "pe", "pb"):
+            if out.get(k) is not None:
+                out[k] = out[k] * f
+    return out
+
+
+def close_snapshot(cache, as_of: str, intraday: bool, now: datetime) -> tuple[list[dict], str, list[str], str]:
+    """返回 (行, 来源说明, 提示, 口径)。口径：live 收盘后的实时快照 / eod 上次收盘后存下的 / derived 盘中倒推。"""
+    if intraday:
+        hit = cache.get_stale(EOD_KEY, 10 * 86400)
+        if hit and hit[0].get("date") == as_of:
+            v = hit[0]
+            return v["rows"], f"{v['source']}（{as_of} 收盘后存下的全市场数据）", [], "eod"
+        since_open = (now - now.replace(hour=9, minute=15, second=0, microsecond=0)).total_seconds()
+        rows, source, warnings = universe.a_share_snapshot(cache, max_age=max(60.0, min(1800.0, since_open)))
+        return [to_prev_close(r) for r in rows], f"{source}（实时行情倒推到 {as_of} 收盘）", warnings + [DERIVED_NOTE], "derived"
+    max_age = 1800.0
+    if now.weekday() < 5 and as_of == now.date().isoformat():     # 今天收盘后：只认 15:00 以后取的快照
+        since_close = (now - now.replace(hour=15, minute=0, second=0, microsecond=0)).total_seconds()
+        max_age = max(60.0, min(1800.0, since_close))
+    rows, source, warnings = universe.a_share_snapshot(cache, max_age=max_age)
+    if not warnings:                                               # 用了旧缓存兜底的不能当作收盘数据存
+        cache.set(EOD_KEY, {"date": as_of, "rows": rows, "source": source})
+    return rows, source, warnings, "live"
+
+
 def _r(x, n: int = 2):
     return round(x, n) if isinstance(x, (int, float)) else x
 
@@ -74,9 +132,11 @@ def _quote_from_row(r: dict) -> Quote:
                  industry=r.get("industry", ""), source="全市场快照")
 
 
-def _stock_report(router, r: dict, bench: list, rf: float) -> tuple[Instrument, MarketData, dict]:
+def _stock_report(router, r: dict, bench: list, rf: float, partial: str | None = None
+                  ) -> tuple[Instrument, MarketData, dict]:
     inst = symbols.from_key(f"{r['market']}:{r['code']}", "stock", r["name"])
     bars, source = router.series(inst, 800)          # 3 年多：历史参照要用；也和分析页共用缓存
+    bars = drop_partial(bars, partial)
     md = MarketData(instrument=inst, bars=bars, benchmark=symbols.CSI300, benchmark_bars=bench,
                     quote=_quote_from_row(r), sources={"行情": source, "估值": "全市场快照"},
                     fetched_at=beijing_now().strftime("%Y-%m-%d %H:%M"))
@@ -114,16 +174,20 @@ def fill_industries(rows: list[dict]) -> str:
     return note
 
 
-def pick_stocks(router, rows: list[dict], strat: dict, n: int, bench: list, rf: float, progress) -> dict:
-    kept, dropped = screen.hard_filter(rows, strat["hard"])
+def pick_stocks(router, rows: list[dict], strat: dict, n: int, bench: list, rf: float, progress,
+                derived: bool = False, partial: str | None = None, source: str = "") -> dict:
+    hard, skipped = screen.usable_hard(rows, strat["hard"])
+    kept, dropped = screen.hard_filter(rows, hard)
     ranked = screen.prescreen(kept, strat)
-    pool = ranked[: strat.get("pool", 30)]
+    pool = ranked[: int(strat.get("pool", 30) * (1.5 if derived else 1))]   # 倒推的数据要靠 K 线复核，多留一些
     warnings = [w for w in [fill_industries(pool)] if w]
+    if skipped:
+        warnings.append("全市场数据里「" + "、".join(skipped) + "」几乎都是空的（接口变了，或者还没开盘），这几条条件这次没有用")
     p = strategies.profile(strat)
     cands, daily_dropped, failed, stale = [], Counter(), 0, 0
 
     with ThreadPoolExecutor(max_workers=4) as ex:
-        futures = [(r, ex.submit(_stock_report, router, r, bench, rf)) for r in pool]
+        futures = [(r, ex.submit(_stock_report, router, r, bench, rf, partial)) for r in pool]
         for i, (r, fut) in enumerate(futures, 1):
             progress("选股", f"逐只体检初选股票（{i}/{len(pool)}）", 10 + 50 * i / max(len(pool), 1))
             try:
@@ -138,6 +202,11 @@ def pick_stocks(router, rows: list[dict], strat: dict, n: int, bench: list, rf: 
             feats = screen.daily_features(md.bars)
             if r.get("price") and abs(r["price"] / feats["close"] - 1) > 0.01:
                 stale += 1                     # 快照价和 K 线收盘价对不上：两边有一边不是最新的
+            if derived:
+                r, reason = screen.recheck_with_bars(r, md.bars, hard)
+                if reason:
+                    daily_dropped[reason + "（按昨天收盘）"] += 1
+                    continue
             reason = screen.daily_reject(feats, strat["daily"])
             if reason:
                 daily_dropped[reason] += 1
@@ -180,7 +249,8 @@ def pick_stocks(router, rows: list[dict], strat: dict, n: int, bench: list, rf: 
                         "其中一边可能不是最新数据（比如快照还没更新到今天收盘）")
     return {
         "picks": picks, "runners_up": runners, "warnings": warnings,
-        "funnel": {"universe": len(rows), "passed_hard": len(kept), "pool": len(pool),
+        "funnel": {"universe": len(rows), "passed_hard": len(kept), "pool": len(pool), "source": source,
+                   "skipped": skipped,
                    "checked": len(pool) - failed, "passed_daily": len(cands), "picked": len(picks),
                    "dropped": dict(list(dropped.items())[:6]), "daily_dropped": dict(daily_dropped.most_common(6)),
                    "failed": failed},
@@ -193,13 +263,14 @@ def _etf_inst(code: str, name: str) -> Instrument:
     return symbols.from_key(("SH:" if code[0] in "56" else "SZ:") + code, "etf", name)
 
 
-def pick_etfs(router, progress, bench: list | None = None, n: int = 3) -> dict:
+def pick_etfs(router, progress, bench: list | None = None, n: int = 3, partial: str | None = None) -> dict:
     series: dict[str, list] = {}
 
     def one(item):
         code, name, group = item
         inst = _etf_inst(code, name)
         bars, _ = router.series(inst, 800)
+        bars = drop_partial(bars, partial)
         series[code] = bars
         return {"key": inst.key, "code": code, "name": name, "group": group,
                 "price": _r(bars[-1].close, 3), "as_of": bars[-1].date, "momentum": fundpick.etf_momentum(bars)}
@@ -227,6 +298,7 @@ def pick_etfs(router, progress, bench: list | None = None, n: int = 3) -> dict:
     if bench and len(series) >= n:
         try:
             safe_bars, _ = router.series(_etf_inst(*fundpick.SAFE_ETF[:2]), 800)
+            safe_bars = drop_partial(safe_bars, partial)
         except Exception:
             safe_bars = None
         history = _round_all(backtest.rotation_backtest(series, bench, safe_bars, top_n=n))
@@ -332,9 +404,11 @@ def commentary(payload: dict) -> tuple[str | None, str]:
 
 def as_of_label(as_of: str, now: datetime, intraday: bool) -> str:
     """数据日期说人话。工作日里拿到的不是今天的数据，要直接告诉用户。"""
+    if intraday:
+        return "上一个交易日收盘（今天还没收盘，收盘后会更新）"
     if as_of == now.date().isoformat():
-        return "今天盘中，还没收盘" if intraday else "今天收盘"
-    if now.weekday() >= 5 or (now.hour, now.minute) < (9, 30):
+        return "今天收盘"
+    if now.weekday() >= 5 or (now.hour, now.minute) < (9, 15):
         return "最近一个交易日收盘"
     return "不是今天的数据：今天休市，或者数据源还没更新到今天"
 
@@ -352,32 +426,43 @@ def run(router, cache, store, strategy: str | None = None, stock_count: int = 5,
             on_progress(stage=stage, message=message, percent=round(percent))
 
     progress("大盘", "读取全市场行情……", 2)
-    bench, _ = router.series(symbols.CSI300, 800)
+    now = beijing_now()
+    bench_all, _ = router.series(symbols.CSI300, 800)
+    intraday = session_intraday(now, bench_all)
+    partial = now.date().isoformat() if intraday else None     # 今天还没走完的那根 K 线，一律不用
+    bench = drop_partial(bench_all, partial)
     as_of = bench[-1].date
     if skip_if_exists and store.daily_exists(as_of, key):
         return None
-    rows, snap_source, warnings = universe.a_share_snapshot(cache)
-    try:
-        boards = universe.industry_boards(cache)
-    except SourceError as exc:
-        boards = []
-        warnings.append(f"行业板块取不到：{exc}")
-    market = mkt.overview(router, rows, boards, bench)
+    if intraday:
+        existing = store.find_daily(as_of, key)
+        if existing:
+            # 上一个交易日的结果已经有了（收盘后那份用的是完整数据，更准），盘中再算只会更粗糙
+            progress("完成", f"{as_of} 收盘后的精选已经有了，今天的会在收盘后生成", 100)
+            existing["reused"] = True
+            return existing
+    rows, snap_source, warnings, basis = close_snapshot(cache, as_of, intraday, now)
+    boards = []
+    if not intraday:                                           # 盘中的行业涨跌是今天的半场数据，不展示
+        try:
+            boards = universe.industry_boards(cache)
+        except SourceError as exc:
+            warnings.append(f"行业板块取不到：{exc}")
+    market = mkt.overview(router, rows if basis != "derived" else [], boards, bench, partial)
     warnings += market.pop("warnings")
-    now = beijing_now()
-    intraday = as_of == now.date().isoformat() and (now.hour, now.minute) < (15, 5)
 
     progress("选股", "按条件过滤全市场……", 8)
-    stocks = pick_stocks(router, rows, strat, stock_count, bench, rf, progress)
+    stocks = pick_stocks(router, rows, strat, stock_count, bench, rf, progress,
+                         derived=basis == "derived", partial=partial, source=snap_source)
     warnings += stocks.pop("warnings")
-    etfs = pick_etfs(router, progress, bench)
+    etfs = pick_etfs(router, progress, bench, partial=partial)
     warnings += etfs.pop("warnings")
     funds = pick_funds(router, cache, rf, progress)
     warnings += funds.pop("warnings")
 
     payload = {
         "as_of": as_of, "as_of_label": as_of_label(as_of, now, intraday),
-        "created_at": now.strftime("%Y-%m-%d %H:%M:%S"), "intraday": intraday,
+        "created_at": now.strftime("%Y-%m-%d %H:%M:%S"), "intraday": intraday, "basis": basis,
         "strategy": {"key": key, "label": strat["label"], "desc": strat["desc"]},
         "market": market, "stocks": stocks, "etfs": etfs, "funds": funds,
         "sources": {"全市场快照": snap_source}, "warnings": warnings, "commentary": None, "disclaimer": DISCLAIMER,
@@ -404,7 +489,12 @@ def start_background(router, cache, store, **kw) -> bool:
     def target():
         try:
             result = run(router, cache, store, on_progress=STATUS.update, **kw)
-            msg = "这个交易日已经生成过了" if result is None else "已完成"
+            if result is None:
+                msg = "这个交易日已经生成过了"
+            elif result.get("reused"):
+                msg = f"今天还没收盘，{result['as_of']} 收盘后的精选已经有了；今天的会在收盘后生成"
+            else:
+                msg = "已完成"
             STATUS.update(stage="完成", message=msg, percent=100, run_id=(result or {}).get("id", ""))
         except Exception as exc:
             log.exception("每日精选生成失败")

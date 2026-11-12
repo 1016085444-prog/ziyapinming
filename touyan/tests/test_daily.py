@@ -232,6 +232,9 @@ class RunnerTest(unittest.TestCase):
             mock.patch.object(R.universe, "industry_boards", return_value=[
                 {"name": f"板块{i}", "change_pct": 3 - i * 0.5, "code": f"BK{i}"} for i in range(12)]),
             mock.patch.object(R.universe, "fund_rank", side_effect=fake_fund_rank),
+            mock.patch.object(R.eastmoney, "industries", return_value={}),             # 测试不联网
+            # 固定在替身数据最后一天的收盘后，结果不随真实时钟变化（盘中逻辑另有测试）
+            mock.patch.object(R, "beijing_now", return_value=datetime(2026, 10, 30, 16, 0, tzinfo=R.BJ)),
         ]
         for p in self.patches:
             p.start()
@@ -369,7 +372,9 @@ class DailyAPITest(unittest.TestCase):
         self.addCleanup(cache.close)
         with mock.patch.object(R.universe, "a_share_snapshot", return_value=(universe_rows(80), "测试", [])), \
                 mock.patch.object(R.universe, "industry_boards", return_value=[]), \
-                mock.patch.object(R.universe, "fund_rank", side_effect=fake_fund_rank):
+                mock.patch.object(R.universe, "fund_rank", side_effect=fake_fund_rank), \
+                mock.patch.object(R.eastmoney, "industries", return_value={}), \
+                mock.patch.object(R, "beijing_now", return_value=datetime(2026, 10, 30, 16, 0, tzinfo=R.BJ)):
             payload = R.run(FakeRouter(), cache, store, use_llm=False)
         rid = A.store.save_daily(payload)
         self.addCleanup(A.store.delete_daily, rid)
@@ -507,7 +512,83 @@ class RunnerPlanTest(RunnerTest):
     def test_as_of_label(self):
         now = datetime(2026, 11, 11, 22, 0, tzinfo=R.BJ)
         self.assertEqual(R.as_of_label("2026-11-11", now, False), "今天收盘")
-        self.assertEqual(R.as_of_label("2026-11-11", now, True), "今天盘中，还没收盘")
+        self.assertIn("上一个交易日收盘", R.as_of_label("2026-11-10", now, True), "盘中生成一律按上一个交易日收盘")
         self.assertIn("不是今天的数据", R.as_of_label("2026-11-10", now, False), "工作日晚上还拿到昨天的数据要明说")
         self.assertEqual(R.as_of_label("2026-11-13", datetime(2026, 11, 14, 10, 0, tzinfo=R.BJ), False), "最近一个交易日收盘")
         self.assertEqual(R.as_of_label("2026-11-10", datetime(2026, 11, 11, 8, 0, tzinfo=R.BJ), False), "最近一个交易日收盘")
+
+
+class CloseBasisTest(unittest.TestCase):
+    """每日精选一律按完整交易日的收盘算：收盘前生成，就用上一个交易日的收盘。"""
+
+    def test_session_intraday(self):
+        bars = line_bars([10.0] * 30, end=date(2026, 11, 12))          # 最后一根是 11-12（周四）
+
+        def thu(hh, mm):
+            return datetime(2026, 11, 12, hh, mm, tzinfo=R.BJ)
+
+        self.assertTrue(R.session_intraday(thu(10, 0), bars))
+        self.assertFalse(R.session_intraday(thu(15, 30), bars))
+        before = bars[:-1]
+        self.assertTrue(R.session_intraday(thu(9, 20), before), "集合竞价时 K 线可能还没有今天这根")
+        self.assertFalse(R.session_intraday(thu(8, 50), before), "开盘前，快照还是昨天的完整数据")
+        self.assertFalse(R.session_intraday(thu(10, 30), before), "10:30 还没有今天的 K 线，多半是休市")
+        self.assertFalse(R.session_intraday(datetime(2026, 11, 14, 10, 0, tzinfo=R.BJ), bars), "周末")
+        self.assertEqual(R.drop_partial(bars, "2026-11-12")[-1].date, before[-1].date)
+        self.assertEqual(len(R.drop_partial(bars, None)), 30)
+
+    def test_to_prev_close(self):
+        y = R.to_prev_close(stock_row(price=11.0, change_pct=10.0, pe=22.0, pb=2.2, total_mv=1.1e10))
+        self.assertAlmostEqual(y["price"], 10.0)
+        self.assertAlmostEqual(y["pe"], 20.0)
+        self.assertAlmostEqual(y["total_mv"], 1e10)
+        for k in ("amount", "turnover", "volume_ratio", "change_pct"):
+            self.assertNotIn(k, y)
+
+    def test_missing_columns_and_recheck(self):
+        hard = strategies.STRATEGIES["balanced"]["hard"]
+        rows = [stock_row(f"6000{i:02d}", pe=None, amount=0.0) for i in range(20)]
+        h, skipped = S.usable_hard(rows, hard)
+        self.assertEqual(set(skipped), {"成交额", "市盈率"})
+        self.assertEqual(len(S.hard_filter(rows, h)[0]), 20, "某列全空时跳过这条，不把全市场都刷掉")
+        derived = [R.to_prev_close(stock_row())]
+        h2, skipped2 = S.usable_hard(derived, hard)
+        self.assertEqual(skipped2, [])
+        self.assertEqual(len(S.hard_filter(derived, h2)[0]), 1, "倒推的行没有成交额和涨跌幅，初筛不查这两项")
+        bars = line_bars([10.0] * 10 + [10.5])
+        bars[-1].volume = 50000.0                                   # 5 万手 × 100 × 10.5 元 = 5250 万元
+        r2, reason = S.recheck_with_bars(derived[0], bars, hard)
+        self.assertAlmostEqual(r2["change_pct"], 5.0)
+        self.assertEqual(reason, "成交额太小")
+
+
+class IntradayRunTest(RunnerTest):
+    def run_at(self, when, **kw):
+        with mock.patch.object(R, "beijing_now", return_value=when), \
+                mock.patch.object(R.config, "llm_ready", return_value=(False, "")):
+            return self.run_once(**kw)[0]
+
+    def test_before_close_uses_previous_close(self):
+        payload = self.run_at(datetime(2026, 10, 30, 10, 0, tzinfo=R.BJ))   # 替身 K 线最后一根是 10-30
+        self.assertTrue(payload["intraday"])
+        self.assertEqual((payload["basis"], payload["as_of"]), ("derived", "2026-10-29"))
+        self.assertIn("上一个交易日", payload["as_of_label"])
+        self.assertIsNone(payload["market"]["breadth"], "倒推的数据不算涨跌家数")
+        self.assertEqual(payload["market"]["sectors_up"], [])
+        self.assertTrue(all(i["date"] == "2026-10-29" for i in payload["market"]["indices"]))
+        self.assertGreater(len(payload["stocks"]["picks"]), 0)
+        self.assertTrue(all(p["as_of"] == "2026-10-29" for p in payload["stocks"]["picks"]))
+        self.assertTrue(all(e["as_of"] == "2026-10-29" for e in payload["etfs"]["ranking"]))
+        self.assertTrue(any("还没收盘" in w for w in payload["warnings"]))
+        again = self.run_at(datetime(2026, 10, 30, 14, 0, tzinfo=R.BJ))
+        self.assertEqual(again["id"], payload["id"], "盘中再点生成：上一交易日已有结果就直接用，不重复计算")
+
+    def test_close_snapshot_reused_next_morning(self):
+        payload = self.run_at(datetime(2026, 10, 30, 16, 0, tzinfo=R.BJ))
+        self.assertEqual((payload["basis"], payload["as_of"], payload["intraday"]), ("live", "2026-10-30", False))
+        self.assertEqual(self.cache.get_stale(R.EOD_KEY)[0]["date"], "2026-10-30", "收盘后的完整数据存下来")
+        self.cache.set(R.EOD_KEY, {"date": "2026-10-29", "rows": universe_rows(), "source": "测试"})
+        payload = self.run_at(datetime(2026, 10, 30, 10, 0, tzinfo=R.BJ))
+        self.assertEqual(payload["basis"], "eod", "盘中优先用上次收盘后存下的数据，不用倒推")
+        self.assertIsNotNone(payload["market"]["breadth"])
+        self.assertIn("收盘后存下", payload["stocks"]["funnel"]["source"])

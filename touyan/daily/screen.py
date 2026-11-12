@@ -41,7 +41,7 @@ def _reject(r: dict, h: dict) -> str:
     price = r.get("price")
     if price is None or price < h.get("price_min", 0) or price > h.get("price_max", INF):
         return "股价不在范围内"
-    if (r.get("amount") or 0) < h.get("amount_min", 0):
+    if "amount" in r and (r.get("amount") or 0) < h.get("amount_min", 0):
         return "成交额太小"
     mv = r.get("total_mv")
     if h.get("mv_min") and (mv is None or mv < h["mv_min"]):
@@ -53,16 +53,53 @@ def _reject(r: dict, h: dict) -> str:
             v = r.get(key)
             if v is None or v <= h.get(f"{key}_min", -INF) or v > h.get(f"{key}_max", INF):
                 return f"{label}不在范围内（含亏损）" if key == "pe" else f"{label}不在范围内"
-    change = r.get("change_pct")
-    if change is None:
-        return "缺少涨跌幅"
-    if change < h.get("change_min", -INF):
-        return "当天跌得太多"
-    if change > h.get("change_max", INF):
-        return "当天涨得太多（不追高）"
-    if h.get("turnover_min") and (r.get("turnover") or 0) < h["turnover_min"]:
+    if "change_pct" in r and ("change_min" in h or "change_max" in h):
+        change = r.get("change_pct")
+        if change is None:
+            return "缺少涨跌幅"
+        if change < h.get("change_min", -INF):
+            return "当天跌得太多"
+        if change > h.get("change_max", INF):
+            return "当天涨得太多（不追高）"
+    if h.get("turnover_min") and "turnover" in r and (r.get("turnover") or 0) < h["turnover_min"]:
         return "换手太低"
     return ""
+
+
+# 某一列几乎全空（接口变了、开盘前还没有成交），这条条件就跳过，而不是把全市场都刷掉
+_COLUMNS = (("amount", "成交额", ("amount_min",), True), ("total_mv", "市值", ("mv_min", "mv_max"), True),
+            ("pe", "市盈率", ("pe_min", "pe_max"), False), ("pb", "市净率", ("pb_min", "pb_max"), False),
+            ("change_pct", "涨跌幅", ("change_min", "change_max"), False), ("turnover", "换手率", ("turnover_min",), True))
+
+
+def usable_hard(rows: list[dict], hard: dict) -> tuple[dict, list[str]]:
+    """返回 (这次实际能用的硬条件, 因数据缺失而跳过的条件名)。只看数据里带了这一列的行。"""
+    h, skipped = dict(hard), []
+    for field, label, keys, zero_is_missing in _COLUMNS:
+        if not any(k in h for k in keys):
+            continue
+        with_key = [r for r in rows if field in r]
+        if not with_key:
+            continue                      # 这一列本来就不在快照里（比如盘中倒推的行），交给 K 线复核
+        have = sum(1 for r in with_key if r[field] is not None and not (zero_is_missing and r[field] == 0))
+        if have < len(with_key) * 0.1:
+            for k in keys:
+                h.pop(k, None)
+            skipped.append(label)
+    return h, skipped
+
+
+def recheck_with_bars(r: dict, bars: list[Bar], hard: dict) -> tuple[dict, str]:
+    """盘中倒推的快照没有昨天的成交额和涨跌幅：用 K 线上最后一根完整日线补上，再按硬条件查一遍。"""
+    last, prev = bars[-1], bars[-2]
+    r2 = dict(r, price=last.close)
+    r2["change_pct"] = (last.close / prev.close - 1) * 100 if prev.close else None
+    amount = last.amount or (last.volume * 100 * last.close if last.volume else None)   # A 股成交量单位是手
+    if amount:
+        r2["amount"] = amount
+    if last.turnover:
+        r2["turnover"] = last.turnover
+    return r2, _reject(r2, hard)
 
 
 def hard_filter(rows: list[dict], hard: dict) -> tuple[list[dict], dict[str, int]]:

@@ -161,6 +161,12 @@ class Store:
             row = self._db.execute(sql + " ORDER BY as_of DESC, created_at DESC LIMIT 1", args).fetchone()
         return json.loads(row[0]) if row else None
 
+    def find_daily(self, as_of: str, strategy: str) -> dict | None:
+        with self._lock:
+            row = self._db.execute("SELECT payload_json FROM daily_runs WHERE as_of = ? AND strategy = ? "
+                                   "ORDER BY created_at DESC LIMIT 1", (as_of, strategy)).fetchone()
+        return json.loads(row[0]) if row else None
+
     def daily_exists(self, as_of: str, strategy: str) -> bool:
         with self._lock:
             row = self._db.execute("SELECT 1 FROM daily_runs WHERE as_of = ? AND strategy = ?",

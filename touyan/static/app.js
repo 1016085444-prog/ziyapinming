@@ -1178,7 +1178,7 @@
       h('div', null, h('h1', { class: 'inst-name' }, '每日精选'),
         h('div', { class: 'small muted' }, p
           ? (archived ? '历史记录 · ' : '') + '数据日期 ' + p.as_of + (p.as_of_label ? '（' + p.as_of_label + '）' : '') + ' · ' +
-            p.strategy.label + ' · 生成于 ' + p.created_at + (p.intraday ? ' · 盘中数据，收盘后可能变化' : '')
+            p.strategy.label + ' · 生成于 ' + p.created_at
           : '收盘后扫一遍全市场，挑出值得关注的股票、ETF 和场外基金')),
       h('span', { class: 'spacer' }),
       archived ? h('a', { class: 'btn', href: '#/daily' }, '回到最新') : null,
@@ -1293,11 +1293,13 @@
       Object.keys(obj).forEach(function (k) { reasons.push(h('li', null, k + '：' + obj[k] + ' 只')); });
     });
     return card('精选股票', '全市场 ' + f.universe + ' 只 → 条件过滤后 ' + f.passed_hard + ' → 初选 ' + f.pool + ' → 入选 ' + f.picked,
+      f.source ? h('div', { class: 'small muted', style: { marginBottom: '10px' } }, '全市场数据：' + f.source) : null,
       st.picks.length ? st.picks.map(function (s, i) { return pickBlock(s, i + 1); })
-        : h('div', { class: 'empty' }, '今天没有股票同时满足全部条件，宁缺毋滥。'),
+        : h('div', { class: 'empty' }, '这次没有股票同时满足全部条件。展开下面看看是哪些条件刷掉的。'),
       st.runners_up.length ? h('div', { class: 'sector-row' }, h('span', { class: 'small muted' }, '其他候选'),
         st.runners_up.map(function (r) { return h('a', { class: 'badge', href: '#/a/' + encodeURIComponent(r.key) }, r.name + ' ' + r.score.toFixed(0)); })) : null,
-      reasons.length ? h('details', { class: 'small muted', style: { marginTop: '10px' } }, h('summary', null, '其余股票为什么没入选'), h('ul', null, reasons)) : null);
+      reasons.length ? h('details', { class: 'small muted', style: { marginTop: '10px' }, open: !st.picks.length },
+        h('summary', null, '其余股票为什么没入选'), h('ul', null, reasons)) : null);
   }
 
   function dailyEtfs(e) {
