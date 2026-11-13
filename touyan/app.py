@@ -178,6 +178,7 @@ def api_config(request: Request):
         "provider_label": providers.get(s.provider).label,
         "models": {"quick": quick, "deep": deep},
         "trusted": trusted(request),
+        "data_dir": str(config.DATA_DIR) if trusted(request) else None,   # 本机路径不给不受信任的远程访问者
         "password_protected": bool(config.APP_PASSWORD),
         "optional": optional.available(),
         "defaults": {"analysts": s.analysts, "debate_rounds": s.debate_rounds, "risk_rounds": s.risk_rounds},
@@ -703,5 +704,8 @@ if __name__ == "__main__":
     if host not in ("127.0.0.1", "localhost") and not config.APP_PASSWORD:
         log.warning("服务监听在 %s 且没有设置 APP_PASSWORD：深度分析与设置只允许本机使用。", host)
     print("\n  正在启动投研智能体……（第一次启动可能要十几秒）", flush=True)
+    print(f"  设置和记录保存在：{config.DATA_DIR}（换新版本、换文件夹都不会丢）", flush=True)
+    if config.MIGRATED:
+        print("  已经把旧版本存在程序文件夹 data 里的设置和记录搬到了上面这个位置。", flush=True)
     _announce_when_ready(url, local, port, open_browser)
     uvicorn.run(app, host=host, port=port, log_level="warning")

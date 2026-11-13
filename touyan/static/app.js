@@ -1532,6 +1532,7 @@
     setView(
       h('h1', { class: 'inst-name', style: { marginBottom: '16px' } }, '设置'),
       locked,
+      s.problem ? h('div', { class: 'notice-box err', style: { marginBottom: '16px' } }, s.problem) : null,
       card('大模型', 'AI 深度分析使用；量化分析不需要',
         h('div', { class: 'settings-grid' },
           h('label', { class: 'field' }, h('span', null, '服务商'), pSelect, note),
@@ -1542,7 +1543,8 @@
           effortField, datalist),
         h('div', { class: 'row', style: { marginTop: '16px' } }, saveBtn, testBtn),
         status,
-        h('p', { class: 'small muted', style: { marginBottom: 0 } }, 'Key 保存在本机 data/settings.json，不会上传到任何地方，页面上只显示掩码。')),
+        h('p', { class: 'small muted', style: { marginBottom: 0 } }, 'Key 只保存在这台电脑上' +
+          (c.data_dir ? '（' + c.data_dir + '）' : '') + '，不会上传到任何地方，页面上只显示掩码。换新版本、换文件夹都不用重新填。')),
       card('分析流程', '对应 TradingAgents 的辩论轮数等参数',
         h('div', { class: 'settings-grid' },
           h('div', { class: 'field' }, h('span', { class: 'small', style: { fontWeight: 600 } }, '默认分析师'), h('div', { class: 'row' }, analystBoxes)),
