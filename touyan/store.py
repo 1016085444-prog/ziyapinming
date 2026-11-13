@@ -51,6 +51,7 @@ CREATE TABLE IF NOT EXISTS daily_runs (
 CREATE INDEX IF NOT EXISTS idx_daily_asof ON daily_runs(as_of, strategy);
 """
 
+DAILY_KEY = "boards"          # 每日精选（四个板块）在 daily_runs.strategy 里的取值
 _LIST_COLS = ("id", "created_at", "inst_key", "code", "market", "kind", "name", "as_of", "price",
               "rating", "rating_label", "quant_score", "quant_rating", "models")
 
@@ -115,18 +116,17 @@ class Store:
     # ── 每日精选 ──────────────────────────────────────────────────
 
     def save_daily(self, payload: dict) -> str:
-        """同一交易日、同一选股风格只留最新一次。"""
+        """同一个交易日只留最新一次。"""
         rid = uuid.uuid4().hex[:12]
         payload = {**payload, "id": rid}
         strategy = payload["strategy"]["key"]
-        summary = {
-            "strategy_label": payload["strategy"]["label"],
-            "regime": payload["market"]["regime"]["label"],
-            "stocks": [{"key": p["key"], "name": p["name"], "score": p["score"], "signal": p["dashboard"]["signal"]}
-                       for p in payload["stocks"]["picks"]],
-            "etfs": [{"key": p["key"], "name": p["name"]} for p in payload["etfs"]["picks"]],
-            "funds": [{"key": p["key"], "name": p["name"]} for g in payload["funds"]["groups"] for p in g["picks"]],
-        }
+
+        def names(board: dict) -> list[dict]:
+            picks = list(board["picks"]) + (board.get("etfs") or {}).get("picks", []) + (board.get("funds") or {}).get("picks", [])
+            return [{"key": p["key"], "name": p["name"]} for p in picks]
+
+        summary = {"version": 2, "regime": payload["market"]["regime"]["label"],
+                   "boards": {k: names(b) for k, b in payload["boards"].items()}}
         with self._lock:
             self._db.execute("DELETE FROM daily_runs WHERE as_of = ? AND strategy = ?", (payload["as_of"], strategy))
             self._db.execute("INSERT INTO daily_runs VALUES (?,?,?,?,?,?)",
@@ -136,9 +136,11 @@ class Store:
         return rid
 
     def list_daily(self, limit: int = 60) -> list[dict]:
+        """只列四个板块版本的记录；更早的版本结构不同，留在库里但不再展示。"""
         with self._lock:
             rows = self._db.execute("SELECT id, created_at, as_of, strategy, summary_json FROM daily_runs "
-                                    "ORDER BY as_of DESC, created_at DESC LIMIT ?", (limit,)).fetchall()
+                                    "WHERE strategy = ? ORDER BY as_of DESC, created_at DESC LIMIT ?",
+                                    (DAILY_KEY, limit)).fetchall()
         out = []
         for r in rows:
             d = dict(r)
@@ -151,14 +153,10 @@ class Store:
             row = self._db.execute("SELECT payload_json FROM daily_runs WHERE id = ?", (rid,)).fetchone()
         return json.loads(row[0]) if row else None
 
-    def latest_daily(self, strategy: str | None = None) -> dict | None:
-        sql = "SELECT payload_json FROM daily_runs"
-        args: tuple = ()
-        if strategy:
-            sql += " WHERE strategy = ?"
-            args = (strategy,)
+    def latest_daily(self) -> dict | None:
         with self._lock:
-            row = self._db.execute(sql + " ORDER BY as_of DESC, created_at DESC LIMIT 1", args).fetchone()
+            row = self._db.execute("SELECT payload_json FROM daily_runs WHERE strategy = ? "
+                                   "ORDER BY as_of DESC, created_at DESC LIMIT 1", (DAILY_KEY,)).fetchone()
         return json.loads(row[0]) if row else None
 
     def find_daily(self, as_of: str, strategy: str) -> dict | None:

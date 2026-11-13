@@ -15,17 +15,16 @@ LICENSE-TradingAgents.txt：
 
 以上文件均已修改，与原项目不同；其余代码为本项目编写。
 
-每日精选（daily/）的流程与规则学自 daily_stock_analysis（MIT License，Copyright (c) 2026 ZhuLinsen，
+每日精选（daily/）的产品形态和数据管线学自 daily_stock_analysis（MIT License，Copyright (c) 2026 ZhuLinsen，
 https://github.com/ZhuLinsen/daily_stock_analysis），其选股引擎源自 AlphaSift
 （Apache License 2.0，https://github.com/ZhuLinsen/alphasift）：
 
-- daily/strategies.py：三种选股风格的硬条件、因子权重、打分曲线与风险阈值，取自其
-  balanced_alpha、quality_value、shrink_pullback 策略的参数。
-- daily/screen.py：因子打分曲线、技术信号分的计算方式参照其 screening/scorer.py、daily.py
-  用纯 Python 重新实现；检查清单与「乖离率超过 5% 不追高」的纪律来自其决策仪表盘提示词。
-- daily/funds.py：ETF「双动量」轮动的规则参照其 ETF 轮动文档。
+- market/universe.py：全市场快照的数据源选择与降级顺序参照其 screening/snapshot.py。
+- daily/common.py：按行业大类分散（同一大类限制只数）的做法来自其策略里的组合分散规则。
+- 「全市场快照 → 筛选 → 把结论写成可执行的计划」的流程参照其选股引擎与决策仪表盘。
 
-以上为参照原项目重新编写，未复制其代码。
+四个板块的选法（daily/short.py、mid.py、longterm.py、dca.py）和检验方式（daily/sim.py）是本项目设计的，
+思路参考了公开的学术研究（见 README「思路来源」），没有使用上述项目的策略参数，也未复制其代码。
 
 数据接口的地址、参数与字段含义参考了 akshare（MIT License，
 https://github.com/akfamily/akshare）的实现，未复制其代码。

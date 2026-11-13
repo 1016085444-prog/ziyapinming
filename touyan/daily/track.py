@@ -1,7 +1,10 @@
-"""历史表现：过去每天精选出来的标的，之后实际涨了多少、有没有跑赢沪深300。
+"""历史表现：过去每天四个板块选出来的标的，之后实际涨了多少、有没有跑赢沪深300。
 
-口径：入场价取精选当天（数据日期）的收盘，之后第 1、5、20 个交易日的收盘算持有收益，
-同期沪深300 收益相减得到超额收益。还没走完的期限不计入该期限的统计。
+口径和「方法体检」一致：收盘后才知道入选，所以按**下一个交易日**算买入——股票和 ETF 用开盘价，
+场外基金用那天的净值（今天申购，拿到的就是下一个交易日的净值）。每个板块看和它持有期相称的两个时间点：
+短期第 3、8 个交易日，中期第 20、60 个，长期和定投第 60、250 个；还没走到的不计入。
+
+这是真正的「样本外」记录：方法定下来之后才发生的行情，比任何回头检验都更有说服力。
 样本少于 30 个时胜率没有统计意义，页面会提示。
 """
 
@@ -12,39 +15,38 @@ from concurrent.futures import ThreadPoolExecutor
 from market import symbols
 from market.models import Bar
 
-HORIZONS = (1, 5, 20)
-GROUPS = (("stocks", "股票"), ("etfs", "ETF"), ("funds", "场外基金"))
+HORIZONS = {"short": (3, 8), "mid": (20, 60), "long": (60, 250), "dca": (60, 250)}
+LABELS = {"short": "短期", "mid": "中期", "long": "长期", "dca": "定投"}
 MIN_SAMPLES = 30
 
 
-def _index_on_or_before(bars: list[Bar], day: str) -> int | None:
-    idx = None
-    for i, b in enumerate(bars):
-        if b.date <= day:
-            idx = i
+def outcome(bars: list[Bar], as_of: str, bench: list[Bar], horizons: tuple[int, ...], is_fund: bool) -> dict | None:
+    i = None
+    for k, b in enumerate(bars):
+        if b.date <= as_of:
+            i = k
         else:
             break
-    return idx
-
-
-def outcome(bars: list[Bar], as_of: str, bench: list[Bar]) -> dict | None:
-    i = _index_on_or_before(bars, as_of)
-    if i is None:
+    if i is None or i + 1 >= len(bars):
+        return None                                   # 入选之后还没有新的行情
+    e = i + 1
+    entry = bars[e].adj_close if is_fund else (bars[e].open or bars[e].close)
+    if not entry or entry <= 0:
         return None
-    entry = bars[i].adj_close
-    bench_map = {b.date: b.adj_close for b in bench}
-    b0 = bench_map.get(bars[i].date)
-    out = {"entry_date": bars[i].date, "days": len(bars) - 1 - i}
-    marks = {f"t{h}": i + h for h in HORIZONS}
+    bench_at = {b.date: b for b in bench}
+    b0 = bench_at.get(bars[e].date)
+    base = (b0.adj_close if is_fund else b0.open) if b0 else None
+    out = {"entry_date": bars[e].date, "days": len(bars) - 1 - e}
+    marks = {f"h{n + 1}": e + h for n, h in enumerate(horizons)}
     marks["now"] = len(bars) - 1
     for key, j in marks.items():
-        if j >= len(bars) or j == i:
+        if j >= len(bars) or j <= e and key != "now":
             continue
         ret = bars[j].adj_close / entry - 1
         out[key] = ret
-        b1 = bench_map.get(bars[j].date)
-        if b0 and b1:
-            out[f"{key}_excess"] = ret - (b1 / b0 - 1)
+        b1 = bench_at.get(bars[j].date)
+        if base and b1:
+            out[f"{key}_excess"] = ret - (b1.adj_close / base - 1)
     return out
 
 
@@ -58,65 +60,59 @@ def summarize(rets: list[float], excess: list[float]) -> dict:
 
 
 def picks_of(payload: dict) -> dict[str, list[dict]]:
-    return {
-        "stocks": [{"key": p["key"], "name": p["name"], "kind": "stock"} for p in payload["stocks"]["picks"]],
-        "etfs": [{"key": p["key"], "name": p["name"], "kind": "etf"} for p in payload["etfs"]["picks"]],
-        "funds": [{"key": p["key"], "name": p["name"], "kind": "fund"}
-                  for g in payload["funds"]["groups"] for p in g["picks"]],
-    }
+    out = {}
+    for key, board in (payload.get("boards") or {}).items():
+        picks = list(board["picks"]) + (board.get("etfs") or {}).get("picks", []) + (board.get("funds") or {}).get("picks", [])
+        out[key] = [{"key": p["key"], "name": p["name"], "kind": p.get("kind", "stock")} for p in picks]
+    return out
 
 
-def performance(store, router, limit: int = 40) -> dict:
+def performance(store, router, limit: int = 60) -> dict:
     runs = [store.get_daily(r["id"]) for r in store.list_daily(limit)]
-    runs = [r for r in runs if r]
+    runs = [r for r in runs if r and r.get("boards")]
     if not runs:
-        return {"runs": [], "groups": {}, "min_samples": MIN_SAMPLES}
-    keys: dict[str, dict] = {}
+        return {"runs": [], "boards": {}, "min_samples": MIN_SAMPLES}
+    items: dict[str, dict] = {}
     for run in runs:
-        for items in picks_of(run).values():
-            for it in items:
-                keys.setdefault(it["key"], it)
+        for picks in picks_of(run).values():
+            for it in picks:
+                items.setdefault(it["key"], it)
 
     def series(item):
         inst = symbols.from_key(item["key"], item["kind"], item["name"])
-        bars, _ = router.series(inst, 300)
-        return bars
+        return router.series(inst, 400)[0]
 
     bars_by_key: dict[str, list[Bar]] = {}
     with ThreadPoolExecutor(max_workers=4) as ex:
-        futures = {k: ex.submit(series, it) for k, it in keys.items()}
+        futures = {k: ex.submit(series, it) for k, it in items.items()}
         for k, fut in futures.items():
             try:
                 bars_by_key[k] = fut.result()
             except Exception:
                 continue
-    bench, _ = router.series(symbols.CSI300, 300)
+    bench, _ = router.series(symbols.CSI300, 400)
 
-    stats: dict[str, dict[str, tuple[list, list]]] = {g: {h: ([], []) for h in ("t1", "t5", "t20", "now")}
-                                                     for g, _ in GROUPS}
+    stats = {b: {h: ([], []) for h in ("h1", "h2", "now")} for b in HORIZONS}
     run_rows = []
     for run in runs:
-        groups = picks_of(run)
-        row = {"id": run["id"], "as_of": run["as_of"], "strategy": run["strategy"]["label"], "items": []}
-        for g, _ in GROUPS:
-            for it in groups[g]:
+        row = {"id": run["id"], "as_of": run["as_of"], "items": []}
+        for board, picks in picks_of(run).items():
+            if board not in HORIZONS:
+                continue
+            for it in picks:
                 bars = bars_by_key.get(it["key"])
-                res = outcome(bars, run["as_of"], bench) if bars else None
-                row["items"].append({"group": g, "key": it["key"], "name": it["name"],
+                res = outcome(bars, run["as_of"], bench, HORIZONS[board], it["key"].startswith("OF:")) if bars else None
+                row["items"].append({"board": board, "key": it["key"], "name": it["name"],
                                      "return": (res or {}).get("now"), "excess": (res or {}).get("now_excess"),
                                      "days": (res or {}).get("days")})
-                if not res:
-                    continue
-                for h in ("t1", "t5", "t20", "now"):
-                    if h in res:
-                        stats[g][h][0].append(res[h])
+                for h in ("h1", "h2", "now"):
+                    if res and h in res:
+                        stats[board][h][0].append(res[h])
                         if f"{h}_excess" in res:
-                            stats[g][h][1].append(res[f"{h}_excess"])
-        stock_rets = [x["return"] for x in row["items"] if x["group"] == "stocks" and x["return"] is not None]
-        row["stocks_avg"] = sum(stock_rets) / len(stock_rets) if stock_rets else None
+                            stats[board][h][1].append(res[f"{h}_excess"])
         run_rows.append(row)
     return {
         "runs": run_rows, "min_samples": MIN_SAMPLES,
-        "groups": {g: {"label": label, **{h: summarize(*stats[g][h]) for h in ("t1", "t5", "t20", "now")}}
-                   for g, label in GROUPS},
+        "boards": {b: {"label": LABELS[b], "horizons": list(HORIZONS[b]),
+                       **{h: summarize(*stats[b][h]) for h in ("h1", "h2", "now")}} for b in HORIZONS},
     }

@@ -156,7 +156,7 @@ SETTINGS_PATH = DATA_DIR / "settings.json"
 APP_PASSWORD = os.environ.get("APP_PASSWORD", "")
 ALLOW_REMOTE = os.environ.get("TOUYAN_ALLOW_REMOTE", "").lower() in ("1", "true", "yes", "on")
 MAX_JOBS = int(os.environ.get("TOUYAN_MAX_JOBS", "2"))
-VERSION = "1.2.0"
+VERSION = "1.3.0"
 CODE_DIRS = ("agents", "daily", "market", "quant")
 
 

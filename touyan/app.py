@@ -11,7 +11,7 @@
     POST /api/deep                 发起 AI 深度分析（多智能体，后台运行）
     GET  /api/deep/{id}/events     深度分析实时事件（SSE）
     GET  /api/history…             历史记录与复盘
-    GET/POST /api/daily…           每日精选：大盘、精选股票 / ETF / 基金、历史表现
+    GET/POST /api/daily…           每日精选：大盘、短期 / 中期 / 长期 / 定投四个板块、历史表现
     GET/POST /api/settings…        大模型设置、连通性测试
     GET  /api/selftest             数据源自检
 
@@ -48,7 +48,6 @@ from agents.llm import LLMError, make_llm
 from agents.pipeline import DeepOptions, Pipeline
 from agents.pipeline import to_markdown as deep_markdown
 from daily import runner as daily_runner
-from daily import strategies as daily_strategies
 from daily import text as daily_text
 from daily import track as daily_track
 from jobs import JobManager, coalesce
@@ -466,8 +465,6 @@ def api_settings():
 @app.post("/api/settings")
 def api_settings_save(patch: dict, request: Request):
     require_trusted(request)
-    if "daily_strategy" in patch and patch["daily_strategy"] not in daily_strategies.STRATEGIES:
-        raise HTTPException(400, "未知的选股风格")
     try:
         return config.public(config.save(patch))
     except ValueError as exc:
@@ -509,20 +506,17 @@ def api_selftest():
 # ── 每日精选 ───────────────────────────────────────────────────
 
 class DailyRunRequest(BaseModel):
-    strategy: str | None = None
     stock_count: int | None = Field(None, ge=3, le=10)
     use_llm: bool | None = None
 
 
 @app.get("/api/daily")
-def api_daily(request: Request, strategy: str | None = None):
+def api_daily(request: Request):
     s = config.load()
     return {
-        "latest": store.latest_daily(strategy or None),
+        "latest": store.latest_daily(),
         "status": daily_runner.STATUS.snapshot(),
-        "strategies": daily_strategies.public(),
-        "settings": {"auto": s.daily_auto, "strategy": s.daily_strategy, "stock_count": s.daily_stock_count,
-                     "llm": s.daily_llm},
+        "settings": {"auto": s.daily_auto, "stock_count": s.daily_stock_count, "llm": s.daily_llm},
         "llm_ready": config.llm_ready(s)[0],
         "can_run": trusted(request),
     }
@@ -537,11 +531,8 @@ def api_daily_status():
 def api_daily_run(req: DailyRunRequest, request: Request):
     require_trusted(request)
     s = config.load()
-    strategy = req.strategy or s.daily_strategy
-    if strategy not in daily_strategies.STRATEGIES:
-        raise HTTPException(400, "未知的选股风格")
     started = daily_runner.start_background(
-        router, cache, store, strategy=strategy, stock_count=req.stock_count or s.daily_stock_count,
+        router, cache, store, stock_count=req.stock_count or s.daily_stock_count,
         use_llm=s.daily_llm if req.use_llm is None else req.use_llm)
     if not started:
         raise HTTPException(409, "每日精选正在生成中，请稍候")

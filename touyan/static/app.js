@@ -59,6 +59,7 @@
     pct: function (frac, d, signed) {
       if (frac === null || frac === undefined || !isFinite(frac)) return '—';
       var v = frac * 100;
+      if (Math.abs(v) < 0.5 * Math.pow(10, -(d === undefined ? 2 : d))) v = 0;   // 不显示 -0.0%
       return (signed === false ? '' : v > 0 ? '+' : '') + v.toFixed(d === undefined ? 2 : d) + '%';
     },
     pp: function (v, d) {
@@ -158,7 +159,7 @@
     if (navKey === 'settings') return viewSettings();
     if (navKey === 'import') return viewImport();
     if ((m = hash.match(/^#\/daily\/(\w+)/))) return viewDaily(m[1]);
-    if (navKey === 'daily') return viewDaily(null, new URLSearchParams(hash.split('?')[1] || '').get('strategy') || undefined);
+    if (navKey === 'daily') return viewDaily(null);
     return viewHome();
   }
 
@@ -1108,22 +1109,23 @@
   }
 
   // ── 设置 ─────────────────────────────────────────────────────
-  // ── 每日精选 ───────────────────────────────────────────────
+  // ── 每日精选（短期 / 中期 / 长期 / 定投四个板块） ─────────────────
 
-  var CHECK_MARK = { pass: '✓', warn: '!', fail: '✕' };
+  var CHECK_MARK = { pass: '✓', warn: '!', fail: '✕', info: '·' };
+  var BOARD_ORDER = ['short', 'mid', 'long', 'dca'];
 
-  function viewDaily(runId, strategy) {
+  function viewDaily(runId) {
     setView(loading());
     var meta;
-    api('/api/daily', { params: { strategy: strategy } }).then(function (m) {
+    api('/api/daily').then(function (m) {
       meta = m;
       return runId ? api('/api/daily/runs/' + encodeURIComponent(runId)) : m.latest;
     }).then(function (p) {
-      renderDaily(meta, p, strategy || (p ? p.strategy.key : meta.settings.strategy), !!runId);
-    }).catch(function (e) { setView(errorCard(e.message, function () { viewDaily(runId, strategy); })); });
+      renderDaily(meta, p, !!runId);
+    }).catch(function (e) { setView(errorCard(e.message, function () { viewDaily(runId); })); });
   }
 
-  function renderDaily(meta, p, strategy, archived) {
+  function renderDaily(meta, p, archived) {
     var status = h('div', { class: 'daily-status', hidden: true, role: 'status' });
     var runBtn = meta.can_run ? h('button', { class: 'btn btn-primary', type: 'button' }, p && !archived ? '重新生成' : '生成今日精选') : null;
     var timer = null;
@@ -1134,7 +1136,7 @@
       if (st.running) {
         fill(status, h('div', null, h('span', { class: 'spinner' }), ' ', (st.stage ? st.stage + '：' : '') + (st.message || '')),
           h('div', { class: 'meter' }, h('i', { style: { width: (st.percent || 0) + '%' } })),
-          h('div', { class: 'small muted' }, '全市场扫描加逐只体检，大约 1–3 分钟。可以先去别的页面，回来再看。'));
+          h('div', { class: 'small muted' }, '要下载几百只股票的行情、逐个检验方法，大约 3–5 分钟。可以先去别的页面，回来再看。'));
       } else {
         fill(status, h('span', { class: 'bad-mark' }, '上次生成失败：'), st.error);
       }
@@ -1148,53 +1150,67 @@
           clearInterval(timer); timer = null;
           if (st.error) { if (runBtn) runBtn.disabled = false; return; }
           toast(st.message || '已完成');
-          viewDaily(null, strategy);
+          viewDaily(null);
         }).catch(function () { /* 下次再试 */ });
       }, 1500);
       onCleanup(function () { if (timer) clearInterval(timer); });
     }
     if (runBtn) runBtn.addEventListener('click', function () {
       runBtn.disabled = true;
-      api('/api/daily/run', { method: 'POST', body: { strategy: strategy } }).then(function (st) { showStatus(st); poll(); })
+      api('/api/daily/run', { method: 'POST', body: {} }).then(function (st) { showStatus(st); poll(); })
         .catch(function (e) { toast(e.message, 'err'); runBtn.disabled = false; });
     });
     if (meta.status.running) { if (runBtn) runBtn.disabled = true; showStatus(meta.status); poll(); }
     else if (meta.status.error) showStatus(meta.status);
 
-    var tools = h('div', { class: 'daily-tools' },
-      seg(meta.strategies.map(function (s) { return [s.key, s.label]; }), strategy, function (k) { location.hash = '#/daily?strategy=' + k; }),
-      h('span', { class: 'small muted' }, (meta.strategies.filter(function (s) { return s.key === strategy; })[0] || {}).desc || ''));
+    var tools = h('div', { class: 'daily-tools' });
     if (meta.can_run) {
-      var box = h('input', { type: 'checkbox', checked: meta.settings.auto && meta.settings.strategy === strategy });
+      var box = h('input', { type: 'checkbox', checked: meta.settings.auto });
       box.addEventListener('change', function () {
-        api('/api/settings', { method: 'POST', body: { daily_auto: box.checked, daily_strategy: strategy } }).then(function () {
+        api('/api/settings', { method: 'POST', body: { daily_auto: box.checked } }).then(function () {
           toast(box.checked ? '已开启：每个交易日 15:45 之后自动生成（软件要开着）' : '已关闭自动生成');
         }).catch(function (e) { toast(e.message, 'err'); box.checked = !box.checked; });
       });
-      tools.appendChild(h('label', { class: 'check' }, box, '交易日收盘后自动生成这个风格'));
+      tools.appendChild(h('label', { class: 'check' }, box, '交易日收盘后自动生成'));
     }
 
+    var isNew = p && p.boards;
     var head = h('div', { class: 'row daily-head' },
       h('div', null, h('h1', { class: 'inst-name' }, '每日精选'),
-        h('div', { class: 'small muted' }, p
-          ? (archived ? '历史记录 · ' : '') + '数据日期 ' + p.as_of + (p.as_of_label ? '（' + p.as_of_label + '）' : '') + ' · ' +
-            p.strategy.label + ' · 生成于 ' + p.created_at
-          : '收盘后扫一遍全市场，挑出值得关注的股票、ETF 和场外基金')),
+        h('div', { class: 'small muted' }, isNew
+          ? (archived ? '历史记录 · ' : '') + '数据日期 ' + p.as_of + (p.as_of_label ? '（' + p.as_of_label + '）' : '') + ' · 生成于 ' + p.created_at
+          : '收盘后扫一遍全市场，分短期、中期、长期、定投四个板块，各用各的方法选')),
       h('span', { class: 'spacer' }),
       archived ? h('a', { class: 'btn', href: '#/daily' }, '回到最新') : null,
-      p ? h('a', { class: 'btn', href: '/api/daily/runs/' + encodeURIComponent(p.id) + '/markdown' }, '下载文字版') : null,
+      isNew ? h('a', { class: 'btn', href: '/api/daily/runs/' + encodeURIComponent(p.id) + '/markdown' }, '下载文字版') : null,
       archived ? null : runBtn);
 
-    if (!p) {
+    if (!isNew) {
       setView(head, tools, status, card(null, null, h('div', { class: 'empty' },
-        meta.can_run ? '这个风格还没有生成过。点右上角「生成今日精选」，大约 1–3 分钟。' : '这个风格还没有生成过。')), dailyHistory(null));
+        p ? '这条记录是旧版本生成的，结构和现在的四个板块不同。' + (meta.can_run ? '点右上角重新生成。' : '')
+          : (meta.can_run ? '还没有生成过。点右上角「生成今日精选」，大约 3–5 分钟。' : '还没有生成过。'))), dailyHistory(null));
       return;
     }
+
+    var boardBox = h('div');
+    var current = LS.get('dailyBoard', 'short');
+    if (!p.boards[current]) current = 'short';
+    function show(key) {
+      LS.set('dailyBoard', key);
+      fill(boardBox, boardView(p.boards[key]));
+    }
+    var tabs = seg(BOARD_ORDER.filter(function (k) { return p.boards[k]; }).map(function (k) {
+      var b = p.boards[k];
+      return [k, b.title + ' · ' + b.horizon.replace('，每月一次', '')];
+    }), current, show);
+    tabs.classList.add('board-tabs');
+    show(current);
+
     setView(head, tools, status,
       dailyMarket(p.market),
       p.commentary ? card('今日点评', '大模型根据下面的数据撰写，只引用了数据里的数字',
         h('div', { class: 'md', html: window.MD.render(p.commentary) })) : null,
-      dailyStocks(p.stocks), dailyEtfs(p.etfs), dailyFunds(p.funds), dailyHistory(p.id),
+      tabs, boardBox, dailyHistory(p.id),
       p.warnings && p.warnings.length ? card('数据提示', null, h('ul', { class: 'small muted' }, p.warnings.map(function (w) { return h('li', null, w); }))) : null,
       h('p', { class: 'small muted' }, p.disclaimer));
   }
@@ -1220,143 +1236,143 @@
       m.sectors_down.length ? h('div', { class: 'sector-row' }, h('span', { class: 'small muted' }, '领跌行业'), boardChips(m.sectors_down)) : null);
   }
 
-  function lvBox(label, v) {
-    return h('div', { class: 'lv' }, h('div', { class: 'small muted' }, label), h('div', { class: 'lvv' }, v === null || v === undefined ? '—' : String(v)));
-  }
-
-  function pickBlock(s, n) {
-    var d = s.dashboard, lv = d.levels;
-    var href = '#/a/' + encodeURIComponent(s.key);
-    return h('article', { class: 'pick' },
-      h('header', { class: 'pick-head' },
-        h('span', { class: 'pick-rank' }, String(n)),
-        h('div', null, h('a', { class: 'pick-name', href: href }, s.name),
-          h('span', { class: 'small muted' }, ' ' + s.code + (s.industry ? ' · ' + s.industry : ''))),
-        h('span', { class: 'spacer' }),
-        h('span', { class: 'pick-price' }, F.num(s.price), ' ', h('span', { class: F.cls(s.change_pct) }, F.pp(s.change_pct))),
-        h('span', { class: 'badge ' + (d.signal === 'buy' ? 'sig-buy' : 'sig-watch') }, d.signal_label),
-        h('span', { class: 'pick-score', title: '最终分 = 全市场因子 45% + 技术信号 25% + 量化体检 30% − 风险扣分' }, s.score.toFixed(0))),
-      h('p', { class: 'pick-one' }, d.one_sentence),
-      h('ul', { class: 'checks' }, d.checklist.map(function (c) {
-        return h('li', { class: 'ck ' + c.status }, h('span', { class: 'ck-mark', 'aria-hidden': 'true' }, CHECK_MARK[c.status]),
-          h('span', { class: 'ck-label' }, c.label), h('span', null, c.detail));
-      })),
-      h('div', { class: 'pick-levels' }, lvBox('理想买点', lv.ideal_buy), lvBox('次优买点', lv.secondary_buy),
-        lvBox('止损', lv.stop_loss), lvBox('目标', lv.target),
-        lvBox('盈亏比', lv.reward_risk === null || lv.reward_risk === undefined ? null : Number(lv.reward_risk).toFixed(1))),
-      h('div', { class: 'pick-advice small' }, h('div', null, h('strong', null, '空仓者：'), d.advice.no_position),
-        h('div', null, h('strong', null, '持仓者：'), d.advice.has_position)),
-      d.risks.length ? h('div', { class: 'pick-advice small' }, h('div', null, h('strong', null, '风险：'), d.risks.join('；'))) : null,
-      planBlock(d.plan),
-      h('div', { class: 'row' }, h('a', { class: 'btn btn-sm', href: href }, '完整体检'),
-        h('a', { class: 'btn btn-sm', href: href + '?tab=ai' }, 'AI 深度分析'), h('span', { class: 'spacer' }),
-        h('span', { class: 'small muted' }, '因子 ' + s.screen_score.toFixed(0) + ' · 技术 ' + s.signal_score.toFixed(0) +
-          ' · 体检 ' + s.quant_score.toFixed(0) + (s.penalty ? ' · 风险扣 ' + s.penalty : ''))));
-  }
-
-  function planStat(label, value, cls) {
+  function stat(label, value, cls) {
     return h('div', { class: 'lv' }, h('div', { class: 'small muted' }, label), h('div', { class: 'lvv ' + (cls || '') }, value));
   }
 
-  function planHistoryText(hist) {
-    if (!hist || !hist.trades) return '过去几年没有出现过足够的类似买点，没法参照。';
-    return '过去 ' + hist.years + ' 年出现类似买点 ' + hist.trades + ' 次，照这个计划操作：平均每次 ' + F.pct(hist.avg, 1) +
-      '，赚钱的占 ' + Math.round(hist.win_rate * 100) + '%；到目标 ' + hist.target_hits + ' 次、止损 ' + hist.stop_hits +
-      ' 次、到期卖出 ' + hist.time_exits + ' 次，平均拿 ' + Math.round(hist.avg_days) + ' 个交易日。' +
-      (hist.trades < 5 ? '样本太少，只能看个大概。' : '');
+  // 方法体检：这个方法放回过去的行情里，结果怎么样
+  function checkupBox(c) {
+    var level = c.level || 'thin';
+    var title = { ok: '方法体检：通过', weak: '方法体检：没通过', thin: '方法体检：样本不足', model: '预期收益怎么来的' }[level];
+    var stats = null;
+    if (c.n) {
+      var use = c.now || c;
+      stats = [h('div', { class: 'plan-stats' },
+        stat('出现过', c.n + ' 次'), stat('赚钱的占', Math.round(c.win_rate * 100) + '%'),
+        stat('平均每笔', F.pct(c.mean, 1), F.cls(c.mean)),
+        stat('同一批随便买', c.baseline === null || c.baseline === undefined ? '—' : F.pct(c.baseline, 1))),
+      h('div', { class: 'small muted' }, '过去' + (c.span || '') + '，在 ' + c.stocks + ' 只里按「第二天开盘买、买入当天不能卖、每笔扣 0.2% 成本」模拟。' +
+        '中位 ' + F.pct(c.median, 1) + '，平均拿 ' + Math.round(c.avg_days) + ' 个交易日。' +
+        (c.now ? '目前「' + c.regime + '」的市场环境下 ' + use.n + ' 次：赚钱的占 ' + Math.round(use.win_rate * 100) + '%，中位 ' + F.pct(use.median, 1) + '。' : ''))];
+    }
+    return h('div', { class: 'checkup lvl-' + level }, h('strong', null, title), h('div', null, c.verdict || ''), stats);
   }
 
-  function planBlock(plan) {
-    if (!plan) return null;
-    return h('div', { class: 'plan-box' },
-      h('div', { class: 'row' }, h('strong', null, '持有计划'),
-        h('span', { class: 'small muted' }, '买入价按 ' + plan.entry + ' 算，一般持有 ' + plan.hold_label + '（最多 ' + plan.hold_max + ' 个交易日）')),
-      h('div', { class: 'plan-stats' }, planStat('目标涨幅', '+' + plan.target_pct + '%', 'up'),
-        planStat('最多亏', '−' + plan.stop_pct + '%', 'down'), planStat('保本线', '+' + plan.breakeven_pct + '%'),
-        planStat('最长持有', plan.hold_max + ' 个交易日')),
-      h('ul', { class: 'plan-rules small' }, plan.rules.map(function (r) { return h('li', null, r); })),
-      h('div', { class: 'small muted' }, '历史参照：' + planHistoryText(plan.history) + '这是过去的统计，不是预测。'));
+  function planHeadline(pick) {
+    var plan = pick.plan, ex = plan.expected || {};
+    var items = [stat('持有时间', plan.horizon)];
+    if (ex.available) {
+      if (ex.kind === 'model') items.push(stat('预期年化', F.pct(ex.annual, 1), 'up'), stat('悲观 / 乐观', F.pct(ex.low, 1) + ' / ' + F.pct(ex.high, 1)));
+      else if (ex.kind === 'dca') items.push(stat('定投 3 年中位', F.pct(ex.median, 0), F.cls(ex.median)), stat('赚钱概率', Math.round(ex.win_rate * 100) + '%'));
+      else if (ex.kind === 'history') items.push(stat('拿满一年中位', F.pct(ex.median, 1), F.cls(ex.median)), stat('赚钱概率', Math.round(ex.win_rate * 100) + '%'));
+      else items.push(stat('单笔预期（中位）', F.pct(ex.median, 1), F.cls(ex.median)), stat('赚钱概率', Math.round(ex.win_rate * 100) + '%'));
+    } else items.push(stat('预期收益', '给不出'));
+    if (pick.temp !== undefined) {
+      items.push(stat('温度', pick.temp === null ? '—' : String(pick.temp)), stat('这个月投', pick.multiplier + ' 倍'));
+    } else {
+      if (plan.target_pct !== null && plan.target_pct !== undefined && plan.target_price) items.push(stat('止盈', '+' + plan.target_pct + '%（' + plan.target_price + '）', 'up'));
+      items.push(stat('止损', plan.stop_pct ? '−' + plan.stop_pct + '%（' + plan.stop_price + '）' : '不设价格止损', plan.stop_pct ? 'down' : ''));
+    }
+    return h('div', { class: 'plan-stats wide' }, items);
   }
 
-  function rotationText(hst) {
-    if (!hst) return null;
-    return '按这套规则从 ' + hst.start + ' 走到 ' + hst.end + '（约 ' + hst.years + ' 年）：累计 ' + F.pct(hst.total, 1) +
-      (hst.cagr !== null && hst.cagr !== undefined ? '，年化 ' + F.pct(hst.cagr, 1) : '') + '，最大回撤 ' + F.pct(hst.max_drawdown, 1) +
-      '；同期沪深300 ' + F.pct(hst.bench_total, 1) + '、最大回撤 ' + F.pct(hst.bench_max_drawdown, 1) +
-      (hst.avg_hold_weeks ? '；每只平均拿 ' + hst.avg_hold_weeks.toFixed(1) + ' 周' : '') + '。未计滑点，过去不代表以后。';
+  function pickCard(pick, n) {
+    var plan = pick.plan, ex = plan.expected || {};
+    var href = '#/a/' + encodeURIComponent(pick.key) + (pick.kind === 'etf' ? '?kind=etf' : '');
+    var digits = pick.kind === 'fund' ? 4 : (pick.price && pick.price < 5 ? 3 : 2);
+    return h('article', { class: 'pick' },
+      h('header', { class: 'pick-head' },
+        h('span', { class: 'pick-rank' }, String(n)),
+        h('div', null, h('a', { class: 'pick-name', href: href }, pick.name),
+          h('span', { class: 'small muted' }, ' ' + pick.code + (pick.industry ? ' · ' + pick.industry : ''))),
+        h('span', { class: 'spacer' }),
+        pick.price ? h('span', { class: 'pick-price' }, F.num(pick.price, digits)) : null,
+        h('span', { class: 'pick-score', title: '这个板块内部的排序分，不同板块之间不能比' }, Number(pick.score).toFixed(0))),
+      h('p', { class: 'pick-one' }, pick.headline),
+      h('ul', { class: 'checks' }, pick.evidence.map(function (c) {
+        return h('li', { class: 'ck ' + c.status }, h('span', { class: 'ck-mark', 'aria-hidden': 'true' }, CHECK_MARK[c.status] || '·'),
+          h('span', { class: 'ck-label' }, c.label), h('span', null, c.detail));
+      })),
+      h('div', { class: 'plan-box' },
+        planHeadline(pick),
+        h('div', { class: 'small' }, h('strong', null, '怎么买：'), plan.entry + (plan.position ? '。' + plan.position + '。' : '')),
+        h('div', { class: 'small' }, h('strong', null, '预期收益：'),
+          ex.reliable === false && ex.available ? h('span', { class: 'bad-mark' }, '这个方法没通过历史检验，数字仅供参考。') : null, ex.text || ''),
+        h('div', { class: 'small' }, h('strong', null, '什么时候卖：')),
+        h('ul', { class: 'plan-rules small' }, plan.rules.map(function (r) { return h('li', null, r); }))),
+      pick.risks && pick.risks.length ? h('div', { class: 'pick-advice small' }, h('div', null, h('strong', null, '风险：'), pick.risks.join('；'))) : null,
+      h('div', { class: 'row' }, h('a', { class: 'btn btn-sm', href: href }, '完整体检'),
+        pick.kind === 'stock' ? h('a', { class: 'btn btn-sm', href: href + '?tab=ai' }, 'AI 深度分析') : null));
   }
 
-  function dailyStocks(st) {
-    var f = st.funnel;
-    var reasons = [];
-    [f.dropped || {}, f.daily_dropped || {}].forEach(function (obj) {
-      Object.keys(obj).forEach(function (k) { reasons.push(h('li', null, k + '：' + obj[k] + ' 只')); });
-    });
-    return card('精选股票', '全市场 ' + f.universe + ' 只 → 条件过滤后 ' + f.passed_hard + ' → 初选 ' + f.pool + ' → 入选 ' + f.picked,
-      f.source ? h('div', { class: 'small muted', style: { marginBottom: '10px' } }, '全市场数据：' + f.source) : null,
-      st.picks.length ? st.picks.map(function (s, i) { return pickBlock(s, i + 1); })
-        : h('div', { class: 'empty' }, '这次没有股票同时满足全部条件。展开下面看看是哪些条件刷掉的。'),
-      st.runners_up.length ? h('div', { class: 'sector-row' }, h('span', { class: 'small muted' }, '其他候选'),
-        st.runners_up.map(function (r) { return h('a', { class: 'badge', href: '#/a/' + encodeURIComponent(r.key) }, r.name + ' ' + r.score.toFixed(0)); })) : null,
-      reasons.length ? h('details', { class: 'small muted', style: { marginTop: '10px' }, open: !st.picks.length },
-        h('summary', null, '其余股票为什么没入选'), h('ul', null, reasons)) : null);
+  function reasonList(funnel) {
+    var reasons = funnel && funnel.reasons ? Object.keys(funnel.reasons) : [];
+    if (!reasons.length) return null;
+    return h('ul', null, reasons.map(function (k) { return h('li', null, k + '：' + funnel.reasons[k] + ' 只'); }));
   }
 
-  function dailyEtfs(e) {
-    var picked = {};
-    e.picks.forEach(function (x) { picked[x.key] = true; });
+  function pickList(picks, funnel, emptyText) {
+    if (picks.length) return picks.map(function (x, i) { return pickCard(x, i + 1); });
+    return h('div', { class: 'empty' }, emptyText, funnel ? h('div', { class: 'small', style: { marginTop: '8px', textAlign: 'left' } }, reasonList(funnel)) : null);
+  }
+
+  function boardView(b) {
+    var f = b.funnel || {};
+    var method = card(b.title + ' · ' + b.name, '持有 ' + b.horizon,
+      h('p', { style: { marginTop: 0 } }, b.idea),
+      h('details', { class: 'small t2' }, h('summary', null, '入选条件（点开看）'), h('ul', null, b.how.map(function (x) { return h('li', null, x); }))),
+      checkupBox(b.checkup));
+    var funnelText = b.key === 'dca' ? '候选 ' + f.pool + ' 只指数基金 → 有足够历史的 ' + f.candidates + ' → 入选 ' + f.picked
+      : b.key === 'long' ? '全市场 ' + f.pool + ' 只 → 初选 ' + f.candidates + ' → 财报过关 ' + f.passed + ' → 入选 ' + f.picked
+        : '核心池 ' + f.pool + ' 只 → 符合条件 ' + f.candidates + ' → 入选 ' + f.picked;
+    var picks = card(b.key === 'dca' ? '这个月适合定投的' : '今天入选的股票', funnelText,
+      b.note ? h('p', { class: 'small muted', style: { marginTop: 0 } }, b.note) : null,
+      pickList(b.picks, f, '今天没有符合条件的，宁缺毋滥。没入选的原因：'),
+      b.picks.length && reasonList(f) ? h('details', { class: 'small muted', style: { marginTop: '10px' } },
+        h('summary', null, '其余的为什么没入选'), reasonList(f)) : null);
+    return [method, picks, b.etfs ? etfSection(b.etfs) : null, b.funds ? fundSection(b.funds) : null, b.ranking ? dcaRanking(b.ranking) : null];
+  }
+
+  function etfSection(e) {
     var rows = e.ranking.map(function (x) {
-      var mo = x.momentum;
-      return h('tr', { class: picked[x.key] ? 'hl' : '' },
+      return h('tr', { class: x.score ? 'hl' : '' },
         h('td', null, h('a', { href: '#/a/' + encodeURIComponent(x.key) + '?kind=etf' }, x.name), h('span', { class: 'small muted' }, ' ' + x.code)),
-        h('td', null, x.group),
-        [mo.r20, mo.r60, mo.r120].map(function (v) { return h('td', { class: 'n ' + F.cls(v) }, F.pp(v, 1)); }),
-        h('td', { class: 'n' }, mo.above_ma20 ? '是' : '否'),
-        h('td', { class: 'n' }, F.pp(mo.drawdown_120d, 1)),
-        h('td', { class: 'n' }, F.num(mo.score, 1)));
+        h('td', null, x.group), h('td', { class: 'n ' + F.cls(x.r60) }, F.pp(x.r60, 1)), h('td', { class: 'n ' + F.cls(x.excess) }, F.pp(x.excess, 1)),
+        h('td', { class: 'n' }, x.r2 === null ? '—' : F.num(x.r2)), h('td', null, x.score ? '入选' : x.why_not));
     });
-    var chips = e.picks.map(function (x) { return h('a', { class: 'badge accent', href: '#/a/' + encodeURIComponent(x.key) + '?kind=etf' }, x.name); });
-    if (e.safe) chips.push(h('a', { class: 'badge', href: '#/a/' + encodeURIComponent(e.safe.key) + '?kind=etf' }, '防守：' + e.safe.name));
-    var plan = e.plan ? h('div', { class: 'plan-box', style: { marginTop: '12px' } }, h('strong', null, '怎么拿'),
-      h('ul', { class: 'plan-rules small' }, e.plan.rules.map(function (r) { return h('li', null, r); })),
-      e.plan.history ? h('div', { class: 'small muted' }, '历史参照：' + rotationText(e.plan.history)) : null) : null;
-    return card('ETF 动量轮动', '按近 60 / 20 / 120 日涨幅排名；只选近 60 日上涨、且站上 20 日线的',
-      h('p', null, e.note + '。'), chips.length ? h('div', { class: 'sector-row' }, chips) : null, plan,
+    return card('ETF（同样的量法）', e.note,
+      h('details', { class: 'small t2' }, h('summary', null, '和股票有什么不同'), h('ul', null, e.how.map(function (x) { return h('li', null, x); }))),
+      checkupBox(e.checkup),
+      e.picks.length ? e.picks.map(function (x, i) { return pickCard(x, i + 1); }) : null,
+      e.safe ? h('p', { class: 'small' }, '空出来的仓位可以先放：', h('a', { href: '#/a/' + encodeURIComponent(e.safe.key) + '?kind=etf' }, e.safe.name + '（' + e.safe.code + '）')) : null,
       rows.length ? h('div', { class: 'table-wrap', style: { marginTop: '12px' } }, h('table', { class: 'tbl' },
-        h('thead', null, h('tr', null, ['ETF', '类别', '近20日', '近60日', '近120日', '站上20日线', '120日最大回撤', '动量分'].map(function (x, i) {
-          return h('th', { class: i >= 2 ? 'n' : '' }, x);
+        h('thead', null, h('tr', null, ['ETF', '类别', '近60日', '比沪深300', '走势拟合度', '结论'].map(function (x, i) {
+          return h('th', { class: i >= 2 && i <= 4 ? 'n' : '' }, x);
         }))), h('tbody', null, rows))) : null);
   }
 
-  function fundHistoryText(hst, horizon) {
-    if (!hst) return '';
-    return '历史参照：过去 ' + hst.years + ' 年里任意一天买入、持有满' + (horizon >= 240 ? '一年' : '半年') + '，赚钱的概率 ' +
-      Math.round(hst.win_rate * 100) + '%，收益中位数 ' + F.pct(hst.median, 1) + '（运气差的 10% 情况 ' + F.pct(hst.p10, 1) +
-      '，运气好的 10% 情况 ' + F.pct(hst.p90, 1) + '）。';
+  function fundSection(fs) {
+    return card('长期持有的基金', '比的是：涨的时候跟不跟得上，跌的时候少不少亏',
+      h('details', { class: 'small t2' }, h('summary', null, '怎么选的'), h('ul', null, fs.how.map(function (x) { return h('li', null, x); }))),
+      pickList(fs.picks, null, '今天没有基金通过全部检查。'),
+      fs.rejected && fs.rejected.length ? h('div', { class: 'small muted', style: { marginTop: '8px' } }, '体检没通过：' +
+        fs.rejected.map(function (x) { return x.name + '（' + x.reason + '）'; }).join('；')) : null);
   }
 
-  function dailyFunds(fs) {
-    function kv(label, value, cls) { return h('div', null, h('dt', null, label), h('dd', { class: cls || '' }, value)); }
-    return card('场外基金', '看长期业绩：近 3 年同类排名为主，再体检规模、经理任期、回撤和夏普', fs.groups.map(function (g) {
-      return h('div', { class: 'fund-group' }, h('h3', null, g.label),
-        g.picks.length ? g.picks.map(function (x) {
-          var r = x.returns;
-          return h('div', { class: 'fund-pick' },
-            h('div', { class: 'row' }, h('a', { class: 'pick-name', href: '#/a/' + encodeURIComponent(x.key) }, x.name),
-              h('span', { class: 'small muted' }, x.code + (x.type ? ' · ' + x.type : '')), h('span', { class: 'spacer' }),
-              h('span', { class: 'pick-score', title: '业绩分 55% + 量化体检 45%' }, x.score.toFixed(0))),
-            h('dl', { class: 'kv' }, kv('近1年', F.pp(r.y1, 1), F.cls(r.y1)), kv('近3年', F.pp(r.y3, 1), F.cls(r.y3)),
-              kv('近3年最大回撤', F.pct(x.max_drawdown_3y, 1)), kv('夏普（3年）', F.num(x.sharpe_3y)),
-              kv('规模', x.scale ? F.num(x.scale, 1) + ' 亿' : '—'), kv('申购费', x.fee || '—')),
-            h('div', { class: 'procon' }, x.pros.map(function (t) { return h('div', { class: 'item' }, h('span', { class: 'mark ok-mark' }, '✓'), t); }),
-              x.cons.map(function (t) { return h('div', { class: 'item' }, h('span', { class: 'mark bad-mark' }, '!'), t); })),
-            x.plan ? h('div', { class: 'small muted' }, '持有：' + x.plan.hold_label + '。' + fundHistoryText(x.plan.history, x.plan.horizon_days)) : null);
-        }) : h('div', { class: 'small muted' }, '今天没有基金通过全部检查。'),
-        g.picks.length && g.picks[0].plan ? h('div', { class: 'plan-box', style: { marginTop: '8px' } }, h('strong', null, '怎么拿'),
-          h('ul', { class: 'plan-rules small' }, g.picks[0].plan.rules.map(function (r) { return h('li', null, r); }))) : null,
-        g.rejected.length ? h('div', { class: 'small muted', style: { marginTop: '6px' } }, '体检没通过：' +
-          g.rejected.map(function (x) { return x.name + '（' + x.reason + '）'; }).join('；')) : null);
-    }));
+  function dcaRanking(list) {
+    return card('全部候选的温度', '温度：0 最便宜，100 最贵。模拟的是每月定投、投满 3 年',
+      h('div', { class: 'table-wrap' }, h('table', { class: 'tbl' },
+        h('thead', null, h('tr', null, ['指数', '基金', '温度', '这个月', '赚钱概率', '中位收益', '折合年化', '较差的一成', '距高点'].map(function (x, i) {
+          return h('th', { class: i === 2 || i >= 4 ? 'n' : '' }, x);
+        }))),
+        h('tbody', null, list.map(function (r) {
+          return h('tr', null, h('td', null, r.index),
+            h('td', null, h('a', { href: '#/a/' + encodeURIComponent(r.key) }, r.name)),
+            h('td', { class: 'n' }, r.temp === null ? '—' : String(r.temp)), h('td', null, r.advice),
+            h('td', { class: 'n' }, r.win_rate.toFixed(0) + '%'), h('td', { class: 'n ' + F.cls(r.median) }, F.pp(r.median, 0)),
+            h('td', { class: 'n ' + F.cls(r.irr) }, F.pp(r.irr, 1)), h('td', { class: 'n ' + F.cls(r.p10) }, F.pp(r.p10, 0)),
+            h('td', { class: 'n' }, F.pp(r.from_high, 0)));
+        })))));
   }
 
   function dailyHistory(currentId) {
@@ -1371,37 +1387,40 @@
         fill(perfEl, perfTable(res));
       }).catch(function (e) { toast(e.message, 'err'); btn.disabled = false; fill(btn, '计算历史表现'); });
     });
+    function names(r, key) {
+      var list = (r.boards || {})[key] || [];
+      return list.map(function (x) { return x.name; }).join('、') || '—';
+    }
     api('/api/daily/runs', { params: { limit: 30 } }).then(function (res) {
       fill(listEl, res.runs.length ? h('div', { class: 'table-wrap', style: { marginTop: '12px' } }, h('table', { class: 'tbl' },
-        h('thead', null, h('tr', null, ['数据日期', '风格', '市场', '精选股票', 'ETF'].map(function (x) { return h('th', null, x); }))),
+        h('thead', null, h('tr', null, ['数据日期', '市场', '短期', '中期', '长期', '定投'].map(function (x) { return h('th', null, x); }))),
         h('tbody', null, res.runs.map(function (r) {
           return h('tr', { class: r.id === currentId ? 'hl' : '' },
-            h('td', null, h('a', { href: '#/daily/' + r.id }, r.as_of)), h('td', null, r.strategy_label), h('td', null, r.regime),
-            h('td', null, r.stocks.map(function (x) { return x.name; }).join('、') || '—'),
-            h('td', null, r.etfs.map(function (x) { return x.name; }).join('、') || '—'));
+            h('td', null, h('a', { href: '#/daily/' + r.id }, r.as_of)), h('td', null, r.regime),
+            BOARD_ORDER.map(function (k) { return h('td', { class: 'small' }, names(r, k)); }));
         })))) : h('div', { class: 'small muted' }, '还没有历史记录。'));
     }).catch(function (e) { fill(listEl, h('div', { class: 'small muted' }, e.message)); });
-    return card('历史表现', '精选当天收盘买入，之后第 1 / 5 / 20 个交易日的收益；超额 = 减去同期沪深300',
-      h('div', { class: 'row' }, h('span', { class: 'small muted' }, '每次精选都会保存，日后对照实际走势，才知道这套规则靠不靠谱。'),
+    return card('历史表现', '入选后第二个交易日买入，之后的实际收益；超额 = 减去同期沪深300',
+      h('div', { class: 'row' }, h('span', { class: 'small muted' }, '每次精选都会保存。这是方法定下来之后才发生的行情，比任何回头检验都更能说明它靠不靠谱。'),
         h('span', { class: 'spacer' }), btn), perfEl, listEl);
   }
 
   function perfTable(res) {
-    var cols = [['t1', '第 1 天'], ['t5', '第 5 天'], ['t20', '第 20 天'], ['now', '至今']];
-    var rows = Object.keys(res.groups).map(function (g) {
-      var G = res.groups[g];
-      return h('tr', null, h('td', null, G.label), cols.map(function (c) {
-        var s = G[c[0]];
+    var rows = BOARD_ORDER.filter(function (k) { return res.boards[k]; }).map(function (k) {
+      var B = res.boards[k];
+      function cell(s) {
         if (!s || !s.n) return h('td', { class: 'n muted' }, '—');
         return h('td', { class: 'n' }, h('div', { class: F.cls(s.avg) }, F.pct(s.avg)),
           h('div', { class: 'small muted' }, '胜率 ' + Math.round(s.win_rate * 100) + '% · 超额 ' + F.pct(s.avg_excess) + ' · ' + s.n + ' 次'));
-      }));
+      }
+      return h('tr', null, h('td', null, B.label, h('div', { class: 'small muted' }, '第 ' + B.horizons[0] + ' / ' + B.horizons[1] + ' 个交易日')),
+        cell(B.h1), cell(B.h2), cell(B.now));
     });
     return [h('div', { class: 'table-wrap', style: { marginTop: '12px' } }, h('table', { class: 'tbl' },
-      h('thead', null, h('tr', null, h('th', null, ''), cols.map(function (c) { return h('th', { class: 'n' }, c[1]); }))),
+      h('thead', null, h('tr', null, h('th', null, '板块'), ['较短的时间点', '较长的时间点', '至今'].map(function (c) { return h('th', { class: 'n' }, c); }))),
       h('tbody', null, rows))),
       h('p', { class: 'small muted' }, '每格上面是平均收益，下面是胜率（收益为正的比例）、平均超额收益和样本数。样本少于 ' +
-        res.min_samples + ' 个时只能看个大概，说明不了规则有效。')];
+        res.min_samples + ' 个时只能看个大概。定投板块这里算的是「入选那天一次买入」的收益，只作参考。')];
   }
 
   function viewSettings() {

@@ -1,7 +1,8 @@
-"""每日精选的一次完整运行：大盘 → 选股 → ETF → 场外基金 →（可选）大模型点评 → 保存。
+"""每日精选的一次完整运行：大盘 → 核心池 → 短期 / 中期 / 长期 / 定投四个板块 →（可选）大模型点评 → 保存。
 
-全市场快照和基金排行各取一次；入围的几十只股票、十几只基金再逐只体检。整个过程约 1–3 分钟，
-数据源用的都是已有的降级链路，个别标的取不到会跳过并记在 warnings 里，不会让整次运行失败。
+四个板块用四种不同的方法（见 short.py、mid.py、longterm.py、dca.py），各自先拿历史数据检验自己，
+再给出今天的入选和每一只的持有计划。一次运行要下载几百只股票的日线，约 3–5 分钟；
+同一个交易日里重新生成会直接用已经下载的数据。个别标的取不到会跳过并记在 warnings 里，不会让整次运行失败。
 """
 
 from __future__ import annotations
@@ -10,26 +11,27 @@ import json
 import logging
 import threading
 import time
-from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import asdict
 from datetime import datetime, timedelta, timezone
 
 import config
 from agents.llm import LLMError, make_llm, strip_think
 from market import eastmoney, symbols, universe
-from market.models import Instrument, MarketData, Quote
+from market.models import FinancialPeriod, Instrument
 from market.net import SourceError
 from quant import report as qr
 
-from . import backtest
-from . import funds as fundpick
+from . import dca, longterm, mid, pool, short
 from . import market as mkt
-from . import screen, strategies
+from .common import guess_industry
 
 log = logging.getLogger("touyan.daily")
 BJ = timezone(timedelta(hours=8))
+BOARDS_KEY = "boards"
+ORDER = ("short", "mid", "long", "dca")
 DISCLAIMER = ("每日精选由公开数据和固定规则自动生成，用来缩小研究范围，不是买卖指令，也不构成投资建议。"
-              "规则没有经过长期回测验证，请结合「历史表现」和自己的判断使用。")
+              "「预期收益」是历史统计或按财报的推算，不是承诺；每个板块都写明了方法在历史上的检验结果，请结合它和自己的判断使用。")
 
 
 def beijing_now() -> datetime:
@@ -94,10 +96,6 @@ def close_snapshot(cache, as_of: str, intraday: bool, now: datetime) -> tuple[li
     return rows, source, warnings, "live"
 
 
-def _r(x, n: int = 2):
-    return round(x, n) if isinstance(x, (int, float)) else x
-
-
 # ── 运行状态（给网页轮询） ────────────────────────────────────────
 
 class RunStatus:
@@ -123,44 +121,10 @@ def is_running() -> bool:
     return _run_lock.locked()
 
 
-# ── 选股 ──────────────────────────────────────────────────────────
-
-def _quote_from_row(r: dict) -> Quote:
-    return Quote(price=r.get("price"), change_pct=r.get("change_pct"), amount=r.get("amount"),
-                 turnover=r.get("turnover"), pe=r.get("pe"), pb=r.get("pb"), total_cap=r.get("total_mv"),
-                 float_cap=r.get("float_mv"), change_60d=r.get("change_60d"), change_ytd=r.get("ytd"),
-                 industry=r.get("industry", ""), source="全市场快照")
-
-
-def _stock_report(router, r: dict, bench: list, rf: float, partial: str | None = None
-                  ) -> tuple[Instrument, MarketData, dict]:
-    inst = symbols.from_key(f"{r['market']}:{r['code']}", "stock", r["name"])
-    bars, source = router.series(inst, 800)          # 3 年多：历史参照要用；也和分析页共用缓存
-    bars = drop_partial(bars, partial)
-    md = MarketData(instrument=inst, bars=bars, benchmark=symbols.CSI300, benchmark_bars=bench,
-                    quote=_quote_from_row(r), sources={"行情": source, "估值": "全市场快照"},
-                    fetched_at=beijing_now().strftime("%Y-%m-%d %H:%M"))
-    try:
-        md.financials = router.financials(inst)
-    except SourceError as exc:
-        md.warnings.append(f"财务数据取不到：{exc}")
-    return inst, md, qr.build(md, rf, chart_bars=2)
-
-
-def _feature_view(f: dict) -> dict:
-    keys = ("ma5", "ma10", "ma20", "ma60", "bias_ma5", "bias_ma20", "change_20d", "change_60d", "rsi14",
-            "volatility_20d", "drawdown_20d", "atr_pct", "vol_ratio_5_20", "signal_score")
-    out = {k: _r(f.get(k), 3 if k.startswith("ma") else 2) for k in keys}
-    out.update({k: f[k] for k in ("ma_aligned", "ma_bullish", "above_ma20", "macd_status", "rsi_status")})
-    return out
-
-
-def _round_all(d: dict | None, n: int = 4) -> dict | None:
-    return {k: _r(v, n) for k, v in d.items()} if d else d
-
+# ── 数据装配 ──────────────────────────────────────────────────────
 
 def fill_industries(rows: list[dict]) -> str:
-    """给缺行业的候选补上行业（一次批量请求）；取不到时按名字猜（银行、证券、保险）。返回提示或空串。"""
+    """给缺行业的股票补上行业（一次批量请求）；取不到时按名字猜（银行、证券、保险）。返回提示或空串。"""
     missing = [r for r in rows if not r.get("industry")]
     if not missing:
         return ""
@@ -170,203 +134,123 @@ def fill_industries(rows: list[dict]) -> str:
     except SourceError as exc:
         found, note = {}, f"股票所属行业取不到（{exc}），行业分散只能按名字粗略判断"
     for r in missing:
-        r["industry"] = found.get(r["code"]) or screen.guess_industry(r.get("name", ""))
+        r["industry"] = found.get(r["code"]) or guess_industry(r.get("name", ""))
     return note
 
 
-def pick_stocks(router, rows: list[dict], strat: dict, n: int, bench: list, rf: float, progress,
-                derived: bool = False, partial: str | None = None, source: str = "") -> dict:
-    hard, skipped = screen.usable_hard(rows, strat["hard"])
-    kept, dropped = screen.hard_filter(rows, hard)
-    ranked = screen.prescreen(kept, strat)
-    pool = ranked[: int(strat.get("pool", 30) * (1.5 if derived else 1))]   # 倒推的数据要靠 K 线复核，多留一些
-    warnings = [w for w in [fill_industries(pool)] if w]
-    if skipped:
-        warnings.append("全市场数据里「" + "、".join(skipped) + "」几乎都是空的（接口变了，或者还没开盘），这几条条件这次没有用")
-    p = strategies.profile(strat)
-    cands, daily_dropped, failed, stale = [], Counter(), 0, 0
+def make_financials(router, cache):
+    """返回 financials(rows) → {代码: 财报列表}。财报一个季度才变一次，存 3 天。"""
+    def one(row):
+        key = f"dailyfin:{row['market']}:{row['code']}"
+        hit = cache.get(key, 3 * 86400)
+        if hit is not None:
+            return [FinancialPeriod(**d) for d in hit]
+        inst = symbols.from_key(f"{row['market']}:{row['code']}", "stock", row.get("name", ""))
+        periods = router.financials(inst)
+        cache.set(key, [asdict(p) for p in periods])
+        return periods
 
-    with ThreadPoolExecutor(max_workers=4) as ex:
-        futures = [(r, ex.submit(_stock_report, router, r, bench, rf, partial)) for r in pool]
-        for i, (r, fut) in enumerate(futures, 1):
-            progress("选股", f"逐只体检初选股票（{i}/{len(pool)}）", 10 + 50 * i / max(len(pool), 1))
-            try:
-                inst, md, rep = fut.result()
-            except Exception as exc:          # 单只失败不影响整体
-                failed += 1
-                log.info("跳过 %s：%s", r["code"], exc)
-                continue
-            if len(md.bars) < 120:
-                daily_dropped["上市不满半年"] += 1
-                continue
-            feats = screen.daily_features(md.bars)
-            if r.get("price") and abs(r["price"] / feats["close"] - 1) > 0.01:
-                stale += 1                     # 快照价和 K 线收盘价对不上：两边有一边不是最新的
-            if derived:
-                r, reason = screen.recheck_with_bars(r, md.bars, hard)
-                if reason:
-                    daily_dropped[reason + "（按昨天收盘）"] += 1
-                    continue
-            reason = screen.daily_reject(feats, strat["daily"])
-            if reason:
-                daily_dropped[reason] += 1
-                continue
-            factors = screen.factor_scores(r, feats, p)
-            s_score = screen.weighted(factors, strat["weights"])
-            pen, notes = screen.risk_penalty(r, feats, strat["risk"])
-            composite = rep["scores"]["composite"]
-            final = screen.final_score(s_score, feats["signal_score"], composite, pen)
-            industry = rep.get("industry") or r.get("industry") or ""
-            cands.append({
-                "key": inst.key, "code": inst.code, "name": inst.name or r["name"], "market": inst.market,
-                "industry": industry, "bucket": screen.bucket_of(industry, inst.name or r["name"]),
-                # 价格取 K 线收盘：仪表盘里的买点、止损都由它算出，两处必须一致
-                "price": round(feats["close"], 3 if feats["close"] < 1 else 2), "change_pct": r.get("change_pct"),
-                "as_of": rep["as_of"],
-                "pe": _r(r.get("pe")), "pb": _r(r.get("pb")), "total_mv": r.get("total_mv"),
-                "amount": r.get("amount"), "turnover": _r(r.get("turnover")),
-                "score": final, "screen_score": s_score, "signal_score": round(feats["signal_score"], 1),
-                "quant_score": composite, "quant_rating": rep["scores"]["rating"]["label"], "penalty": pen,
-                "factors": factors, "features": _feature_view(feats),
-                "_feats": feats, "_rep": rep, "_row": r, "_notes": notes, "_bars": md.bars,
-            })
-
-    cands.sort(key=lambda c: -c["score"])
-    picks = screen.diversify(cands, n)
-    for c in picks:
-        c["dashboard"] = screen.dashboard(c["_row"], c["_feats"], c["_rep"], c["score"], c["_notes"], strat["hold"])
-        plan = c["dashboard"]["plan"]
-        plan["history"] = _round_all(backtest.plan_history(
-            c["_bars"], plan["target_pct"], plan["stop_pct"], plan["hold_max"], plan["breakeven_pct"]))
-    runners = [{"key": c["key"], "name": c["name"], "code": c["code"], "industry": c["industry"], "score": c["score"]}
-               for c in cands if c not in picks][:8]
-    for c in cands:
-        for k in ("_feats", "_rep", "_row", "_notes", "_bars"):
-            c.pop(k, None)
-    checked = len(pool) - failed
-    if checked >= 5 and stale > checked / 2:
-        warnings.append(f"有 {stale}/{checked} 只股票的全市场快照价格和 K 线收盘价对不上，"
-                        "其中一边可能不是最新数据（比如快照还没更新到今天收盘）")
-    return {
-        "picks": picks, "runners_up": runners, "warnings": warnings,
-        "funnel": {"universe": len(rows), "passed_hard": len(kept), "pool": len(pool), "source": source,
-                   "skipped": skipped,
-                   "checked": len(pool) - failed, "passed_daily": len(cands), "picked": len(picks),
-                   "dropped": dict(list(dropped.items())[:6]), "daily_dropped": dict(daily_dropped.most_common(6)),
-                   "failed": failed},
-    }
-
-
-# ── ETF ──────────────────────────────────────────────────────────
-
-def _etf_inst(code: str, name: str) -> Instrument:
-    return symbols.from_key(("SH:" if code[0] in "56" else "SZ:") + code, "etf", name)
-
-
-def pick_etfs(router, progress, bench: list | None = None, n: int = 3, partial: str | None = None) -> dict:
-    series: dict[str, list] = {}
-
-    def one(item):
-        code, name, group = item
-        inst = _etf_inst(code, name)
-        bars, _ = router.series(inst, 800)
-        bars = drop_partial(bars, partial)
-        series[code] = bars
-        return {"key": inst.key, "code": code, "name": name, "group": group,
-                "price": _r(bars[-1].close, 3), "as_of": bars[-1].date, "momentum": fundpick.etf_momentum(bars)}
-
-    rows, warnings = [], []
-    with ThreadPoolExecutor(max_workers=4) as ex:
-        futures = [(item, ex.submit(one, item)) for item in fundpick.ETF_POOL]
-        for i, (item, fut) in enumerate(futures, 1):
-            progress("ETF", f"计算 ETF 动量（{i}/{len(futures)}）", 60 + 10 * i / len(futures))
-            try:
-                rows.append(fut.result())
-            except Exception as exc:
-                warnings.append(f"{item[1]}：{exc}")
-    for r in rows:
-        if r["momentum"]:
-            r["momentum"] = {k: _r(v) for k, v in r["momentum"].items()}
-    picks, note = fundpick.etf_picks(rows, n)
-    ranked = sorted((r for r in rows if r["momentum"]), key=lambda r: -r["momentum"]["score"])
-    safe = None
-    if len(picks) < n:
-        code, name, group = fundpick.SAFE_ETF
-        inst = _etf_inst(code, name)
-        safe = {"key": inst.key, "code": code, "name": name, "group": group}
-    history = None
-    if bench and len(series) >= n:
-        try:
-            safe_bars, _ = router.series(_etf_inst(*fundpick.SAFE_ETF[:2]), 800)
-            safe_bars = drop_partial(safe_bars, partial)
-        except Exception:
-            safe_bars = None
-        history = _round_all(backtest.rotation_backtest(series, bench, safe_bars, top_n=n))
-    plan = {"rules": fundpick.ETF_RULES, "history": history}
-    return {"picks": picks, "ranking": ranked, "note": note, "safe": safe, "plan": plan,
-            "warnings": warnings[:5] + ([f"另有 {len(warnings) - 5} 只取不到"] if len(warnings) > 5 else [])}
-
-
-# ── 场外基金 ──────────────────────────────────────────────────────
-
-def _fund_report(router, row: dict, rf: float) -> tuple[dict, list]:
-    inst = Instrument(row["code"], "OF", "fund", row["name"])
-    md = router.load(inst, days=1200, with_news=False)
-    return qr.build(md, rf, chart_bars=2), md.bars
-
-
-def pick_funds(router, cache, rf: float, progress) -> dict:
-    groups, warnings = [], []
-    used: set[str] = set()          # 同一只基金可能同时出现在两个类别的排行里，只选一次
-    for gi, (key, label, fts, n) in enumerate(fundpick.FUND_PLAN):
-        progress("基金", f"筛选{label}", 70 + 20 * gi / len(fundpick.FUND_PLAN))
-        rows = []
-        for ft in fts:
-            try:
-                rows += universe.fund_rank(cache, ft)
-            except SourceError as exc:
-                warnings.append(f"{universe.FUND_TYPES[ft]}基金排行取不到：{exc}")
-        ranked = [r for r in fundpick.fund_perf_scores(fundpick.fund_prefilter(rows))
-                  if r["code"] not in used and fundpick.share_class_key(r["name"]) not in used][: max(6, n * 3)]
-        picks, rejected = [], []
+    def many(rows: list[dict]) -> dict[str, list]:
+        out = {}
         with ThreadPoolExecutor(max_workers=4) as ex:
-            futures = [(r, ex.submit(_fund_report, router, r, rf)) for r in ranked]
-            for r, fut in futures:
+            futures = [(r["code"], ex.submit(one, r)) for r in rows]
+            for code, fut in futures:
                 try:
-                    rep, nav = fut.result()
+                    out[code] = fut.result()
                 except Exception as exc:
-                    rep, nav = None, []
-                    log.info("基金 %s 体检失败：%s", r["code"], exc)
-                score, pros, cons = fundpick.fund_verdict(r, rep)
-                if score is None:
-                    rejected.append({"code": r["code"], "name": r["name"], "reason": (cons or ["未通过"])[0]})
-                    continue
-                m3 = ((rep or {}).get("metrics") or {}).get("3y") or {}
-                profile = ((rep or {}).get("fund") or {}).get("profile") or {}
-                picks.append({
-                    "key": f"OF:{r['code']}", "code": r["code"], "name": r["name"], "category": label,
-                    "type": r["type"], "nav": r.get("nav"), "nav_date": r.get("nav_date"), "fee": r.get("fee"),
-                    "returns": {k: r.get(k) for k in ("m6", "y1", "y2", "y3", "ytd")},
-                    "perf_score": r["perf_score"], "quant_score": rep["scores"]["composite"],
-                    "quant_rating": rep["scores"]["rating"]["label"], "score": score,
-                    "max_drawdown_3y": _r(m3.get("max_drawdown"), 4), "sharpe_3y": _r(m3.get("sharpe")),
-                    "scale": profile.get("scale"), "pros": pros, "cons": cons,
-                    "plan": fundpick.fund_plan(key, r.get("ft", ""), m3.get("max_drawdown"), _round_all(
-                        backtest.rolling_stats(nav, fundpick.FUND_HOLD.get(key, ("", 250))[1]))),
-                })
-        picks.sort(key=lambda x: -x["score"])
-        for x in picks[:n]:
-            used.update((x["code"], fundpick.share_class_key(x["name"])))
-        groups.append({"key": key, "label": label, "picks": picks[:n], "screened": len(ranked),
-                       "rejected": rejected[:4]})
-    return {"groups": groups, "warnings": warnings}
+                    log.info("财报没取到 %s：%s", code, exc)
+        return out
+
+    return many
+
+
+def load_etfs(router, cache, as_of: str, partial: str | None) -> tuple[dict, dict, list[str]]:
+    """ETF 池的日线（三年多，检验要用）。返回 ({代码: Series}, {代码: (key, 名称, 类别)}, 提示)。"""
+    def one(item):
+        code, name, _ = item
+        key = ("SH:" if code[0] in "56" else "SZ:") + code
+        return key, pool.load_bars(router, cache, key, name, "etf", as_of, partial, 800)
+
+    series, meta, failed = {}, {}, []
+    with ThreadPoolExecutor(max_workers=4) as ex:
+        futures = [(item, ex.submit(one, item)) for item in mid.ETF_POOL]
+        for (code, name, group), fut in futures:
+            try:
+                key, bars = fut.result()
+            except Exception:
+                failed.append(name)
+                continue
+            if bars and bars[-1].date == as_of and len(bars) >= pool.MIN_BARS and pool.clean(bars):
+                series[code] = pool.Series(bars, code, key[:2], name, limit=0.10)
+                meta[code] = (key, name, group)
+            else:
+                failed.append(name)
+    warnings = [f"有 {len(failed)} 只 ETF 的行情没取到：{'、'.join(failed[:5])}"] if failed else []
+    return series, meta, warnings
+
+
+def pick_long_funds(router, cache, bench: list, rf: float, n: int = 3) -> tuple[dict, list[str]]:
+    rows, warnings = [], []
+    for ft in ("gp", "hh"):
+        try:
+            rows += universe.fund_rank(cache, ft)
+        except SourceError as exc:
+            warnings.append(f"{universe.FUND_TYPES[ft]}基金排行取不到：{exc}")
+    ranked = longterm.fund_perf_scores(longterm.fund_prefilter(rows))[:9]
+
+    def one(r):
+        md = router.load(Instrument(r["code"], "OF", "fund", r["name"]), days=1200, with_news=False)
+        return qr.build(md, rf, chart_bars=2), md.bars
+
+    picks, rejected = [], []
+    with ThreadPoolExecutor(max_workers=4) as ex:
+        futures = [(r, ex.submit(one, r)) for r in ranked]
+        for r, fut in futures:
+            try:
+                rep, nav = fut.result()
+            except Exception as exc:
+                rep, nav = None, []
+                log.info("基金 %s 体检失败：%s", r["code"], exc)
+            pick, why = longterm.fund_pick(r, rep, nav, bench)
+            if pick is None:
+                rejected.append({"code": r["code"], "name": r["name"], "reason": why})
+            else:
+                picks.append(pick)
+    picks.sort(key=lambda p: -p["score"])
+    return {"picks": picks[:n], "how": longterm.FUND_HOW, "screened": len(ranked), "rejected": rejected[:4]}, warnings
+
+
+def pick_dca(router, cache, n: int = 5) -> tuple[dict, list[str]]:
+    rows, warnings = [], []
+    for ft in ("zs", "qdii"):
+        try:
+            rows += universe.fund_rank(cache, ft)
+        except SourceError as exc:
+            warnings.append(f"{universe.FUND_TYPES[ft]}基金排行取不到：{exc}")
+    cands = dca.find_candidates(rows)
+    if rows and not cands:
+        warnings.append("基金排行里没有找到符合条件的指数基金（排行数据的格式可能变了），定投板块这次是空的")
+
+    def one(r):
+        return router.fund(Instrument(r["code"], "OF", "fund", r["name"]))[1]
+
+    navs = {}
+    with ThreadPoolExecutor(max_workers=4) as ex:
+        futures = [(r, ex.submit(one, r)) for r in cands]
+        for r, fut in futures:
+            try:
+                navs[r["code"]] = fut.result()
+            except Exception as exc:
+                log.info("基金 %s 净值没取到：%s", r["code"], exc)
+    return dca.select(cands, lambda r: navs[r["code"]], n), warnings
 
 
 # ── 大模型点评（可选） ────────────────────────────────────────────
 
 COMMENT_SYSTEM = (
-    "你是一名谨慎的投研助理。根据用户给的结构化数据写今日点评，350 字以内，分三段：大盘环境；"
-    "精选股票为什么入选、要注意什么；ETF 和基金怎么看。只能引用数据里出现的数字和事实，不编造新闻、业绩或价格；"
+    "你是一名谨慎的投研助理。根据用户给的结构化数据写今日点评，400 字以内：先一句话说大盘环境，"
+    "再按短期、中期、长期、定投四个板块各写两三句——这个板块的方法在历史检验里表现如何、今天选了什么、最该注意什么。"
+    "只能引用数据里出现的数字和事实，不编造新闻、业绩或价格；方法检验结果不好的板块要直说；"
     "不使用「必涨」「稳赚」「强烈推荐」这类词；最后一句提醒：仅供研究参考，不构成投资建议。"
 )
 
@@ -376,23 +260,22 @@ def commentary(payload: dict) -> tuple[str | None, str]:
     ready, reason = config.llm_ready(s)
     if not ready:
         return None, reason
-    brief = {
-        "日期": payload["as_of"], "选股风格": payload["strategy"]["label"],
+
+    def brief(board: dict) -> dict:
+        picks = list(board["picks"]) + (board.get("etfs") or {}).get("picks", []) + (board.get("funds") or {}).get("picks", [])
+        return {"方法": board["name"], "持有": board["horizon"], "历史检验": board["checkup"].get("verdict", ""),
+                "入选": [{"名称": p["name"], "一句话": p["headline"], "预期": p["plan"]["expected"].get("text", "")[:120]}
+                       for p in picks[:6]]}
+
+    data = {
+        "日期": payload["as_of"],
         "大盘": {"市场温度": payload["market"]["regime"]["label"], "依据": payload["market"]["regime"]["notes"],
-               "指数": [{i["name"]: i["change_pct"]} for i in payload["market"]["indices"]],
-               "涨跌家数": payload["market"].get("breadth"),
-               "领涨行业": [b["name"] for b in payload["market"]["sectors_up"]]},
-        "精选股票": [{"名称": p["name"], "行业": p["industry"], "最终分": p["score"], "结论": p["dashboard"]["one_sentence"],
-                  "持有计划": {"目标涨幅%": p["dashboard"]["plan"]["target_pct"], "止损%": p["dashboard"]["plan"]["stop_pct"],
-                           "持有": p["dashboard"]["plan"]["hold_label"]},
-                  "检查清单": {c["label"]: c["status"] for c in p["dashboard"]["checklist"]},
-                  "风险": p["dashboard"]["risks"][:3]} for p in payload["stocks"]["picks"]],
-        "ETF": {"入选": [e["name"] for e in payload["etfs"]["picks"]], "说明": payload["etfs"]["note"]},
-        "基金": [{g["label"]: [f["name"] for f in g["picks"]]} for g in payload["funds"]["groups"]],
+               "指数": [{i["name"]: i["change_pct"]} for i in payload["market"]["indices"]]},
+        **{payload["boards"][k]["title"]: brief(payload["boards"][k]) for k in ORDER},
     }
     try:
         quick, _ = config.llm_configs(s)
-        text = make_llm(quick).complete(COMMENT_SYSTEM, json.dumps(brief, ensure_ascii=False))
+        text = make_llm(quick).complete(COMMENT_SYSTEM, json.dumps(data, ensure_ascii=False))
     except LLMError as exc:
         return None, str(exc)
     except Exception as exc:                       # 网络等异常：点评可有可无，不能拖垮整次运行
@@ -401,6 +284,22 @@ def commentary(payload: dict) -> tuple[str | None, str]:
 
 
 # ── 一次完整运行 ──────────────────────────────────────────────────
+
+def empty_board(module, error: str) -> dict:
+    return {"key": module.KEY, "title": module.TITLE, "name": module.NAME, "horizon": module.HORIZON,
+            "idea": module.IDEA, "how": module.HOW, "picks": [], "funnel": {"pool": 0, "candidates": 0, "picked": 0, "reasons": {}},
+            "checkup": {"level": "thin", "verdict": f"这个板块这次没有生成出来：{error}"}, "warnings": []}
+
+
+def guarded(module, build, warnings: list[str]) -> dict:
+    """一个板块出错不拖垮其他板块：记下原因，这个板块留空。"""
+    try:
+        return build()
+    except Exception as exc:
+        log.exception("%s板块生成失败", module.TITLE)
+        warnings.append(f"{module.TITLE}板块生成失败（{type(exc).__name__}: {exc}），其他板块不受影响。把这句话发给开发者可以帮助定位问题")
+        return empty_board(module, f"{type(exc).__name__}: {exc}")
+
 
 def as_of_label(as_of: str, now: datetime, intraday: bool) -> str:
     """数据日期说人话。工作日里拿到的不是今天的数据，要直接告诉用户。"""
@@ -413,12 +312,11 @@ def as_of_label(as_of: str, now: datetime, intraday: bool) -> str:
     return "不是今天的数据：今天休市，或者数据源还没更新到今天"
 
 
-def run(router, cache, store, strategy: str | None = None, stock_count: int = 5, use_llm: bool = True,
-        on_progress=None, skip_if_exists: bool = False) -> dict | None:
-    """返回保存好的结果。skip_if_exists=True 且这个交易日已有同风格结果时返回 None（自动任务用）。"""
+def run(router, cache, store, stock_count: int = 5, use_llm: bool = True, on_progress=None,
+        skip_if_exists: bool = False) -> dict | None:
+    """返回保存好的结果。skip_if_exists=True 且这个交易日已经有结果时返回 None（自动任务用）。"""
     t0 = time.time()
-    key, strat = strategies.get(strategy)
-    stock_count = max(3, min(10, int(stock_count or 5)))
+    n = max(3, min(10, int(stock_count or 5)))
     rf = config.load().risk_free_rate / 100
 
     def progress(stage: str, message: str, percent: float):
@@ -432,10 +330,10 @@ def run(router, cache, store, strategy: str | None = None, stock_count: int = 5,
     partial = now.date().isoformat() if intraday else None     # 今天还没走完的那根 K 线，一律不用
     bench = drop_partial(bench_all, partial)
     as_of = bench[-1].date
-    if skip_if_exists and store.daily_exists(as_of, key):
+    if skip_if_exists and store.daily_exists(as_of, BOARDS_KEY):
         return None
     if intraday:
-        existing = store.find_daily(as_of, key)
+        existing = store.find_daily(as_of, BOARDS_KEY)
         if existing:
             # 上一个交易日的结果已经有了（收盘后那份用的是完整数据，更准），盘中再算只会更粗糙
             progress("完成", f"{as_of} 收盘后的精选已经有了，今天的会在收盘后生成", 100)
@@ -450,29 +348,87 @@ def run(router, cache, store, strategy: str | None = None, stock_count: int = 5,
             warnings.append(f"行业板块取不到：{exc}")
     market = mkt.overview(router, rows if basis != "derived" else [], boards, bench, partial)
     warnings += market.pop("warnings")
+    regimes = pool.regime_by_date(bench)
+    regime_now = regimes.get(as_of, "震荡")
+    bench60 = mid.bench_returns(bench)
+    rows_by_code = {r["code"]: r for r in rows}
+    financials = make_financials(router, cache)
 
-    progress("选股", "按条件过滤全市场……", 8)
-    stocks = pick_stocks(router, rows, strat, stock_count, bench, rf, progress,
-                         derived=basis == "derived", partial=partial, source=snap_source)
-    warnings += stocks.pop("warnings")
-    etfs = pick_etfs(router, progress, bench, partial=partial)
-    warnings += etfs.pop("warnings")
-    funds = pick_funds(router, cache, rf, progress)
-    warnings += funds.pop("warnings")
+    pool_rows = pool.build_pool(rows)
+    series, pool_info = pool.load_pool(
+        router, cache, pool_rows, as_of, partial,
+        progress=lambda i, total: progress("核心池", f"下载市值最大的 {total} 只股票的日线（{i}/{total}）", 4 + 41 * i / total))
+    if pool_info["wanted"] and pool_info["failed"] > pool_info["wanted"] * 0.2:
+        warnings.append(f"核心池里有 {pool_info['failed']} 只股票的日线没取到（数据源可能在限流），"
+                        "短期和中期板块是在剩下的股票里选的，过一会儿重新生成可以补全")
+    plist = list(series.values())
 
+    progress("短期", "检验方法，找今天被错杀的股票", 47)
+    b_short = guarded(short, lambda: short.select(series, rows_by_code, short.checkup(plist, regimes, regime_now),
+                                                  regime_now, n, fill_industries), warnings)
+
+    progress("中期", "检验方法，找悄悄走强的股票", 52)
+    b_mid = guarded(mid, lambda: mid.select(series, rows_by_code, bench60, mid.checkup(plist, bench60, regimes, regime_now),
+                                            n, financials, fill_industries), warnings)
+    progress("中期", "下载 ETF 行情", 58)
+
+    def etf_section():
+        etf_series, etf_meta, etf_warn = load_etfs(router, cache, as_of, partial)
+        warnings.extend(etf_warn)
+        report = mid.checkup(list(etf_series.values()), bench60, regimes, regime_now, mid.ETF_RULE, "三年")
+        return mid.select_etfs(etf_series, etf_meta, bench60, report)
+
+    try:
+        b_mid["etfs"] = etf_section()
+    except Exception as exc:
+        log.exception("ETF 小节生成失败")
+        warnings.append(f"中期板块的 ETF 部分生成失败（{type(exc).__name__}: {exc}）")
+
+    progress("长期", "读财报，估算长期回报", 66)
+
+    def closes_of(row):
+        s = series.get(row["code"])
+        if s is not None:
+            return s.c
+        bars = pool.load_bars(router, cache, f"{row['market']}:{row['code']}", row.get("name", ""), "stock",
+                              as_of, partial, pool.POOL_DAYS)
+        return [b.close for b in bars]
+
+    b_long = guarded(longterm, lambda: longterm.select(rows, n, financials, fill_industries, closes_of), warnings)
+    progress("长期", "筛选长期持有的基金", 78)
+    try:
+        b_long["funds"], fund_warn = pick_long_funds(router, cache, bench, rf)
+        warnings += fund_warn
+    except Exception as exc:
+        log.exception("长期基金小节生成失败")
+        warnings.append(f"长期板块的基金部分生成失败（{type(exc).__name__}: {exc}）")
+
+    progress("定投", "模拟指数基金的定投", 88)
+
+    def dca_board():
+        board, dca_warn = pick_dca(router, cache)
+        warnings.extend(dca_warn)
+        return board
+
+    b_dca = guarded(dca, dca_board, warnings)
+
+    result = {"short": b_short, "mid": b_mid, "long": b_long, "dca": b_dca}
+    for b in result.values():
+        warnings += b.pop("warnings", [])
     payload = {
-        "as_of": as_of, "as_of_label": as_of_label(as_of, now, intraday),
+        "version": 2, "as_of": as_of, "as_of_label": as_of_label(as_of, now, intraday),
         "created_at": now.strftime("%Y-%m-%d %H:%M:%S"), "intraday": intraday, "basis": basis,
-        "strategy": {"key": key, "label": strat["label"], "desc": strat["desc"]},
-        "market": market, "stocks": stocks, "etfs": etfs, "funds": funds,
-        "sources": {"全市场快照": snap_source}, "warnings": warnings, "commentary": None, "disclaimer": DISCLAIMER,
+        "strategy": {"key": BOARDS_KEY, "label": "四个板块"},
+        "market": market, "regime_bucket": regime_now, "boards": result, "order": list(ORDER),
+        "pool": pool_info, "sources": {"全市场快照": snap_source},
+        "warnings": list(dict.fromkeys(warnings)), "commentary": None, "disclaimer": DISCLAIMER,
     }
     if use_llm:
-        progress("点评", "大模型撰写今日点评……", 92)
+        progress("点评", "大模型撰写今日点评……", 95)
         text, err = commentary(payload)
         payload["commentary"] = text
         if err and config.llm_ready(config.load())[0]:
-            warnings.append(f"大模型点评没有生成：{err}")
+            payload["warnings"].append(f"大模型点评没有生成：{err}")
     payload["elapsed"] = round(time.time() - t0, 1)
     progress("保存", "保存结果", 99)
     payload["id"] = store.save_daily(payload)
@@ -527,11 +483,11 @@ def auto_tick(router, cache, store) -> bool:
     if not s.daily_auto or is_running():
         return False
     now = beijing_now()
-    if not auto_due(now, store.latest_daily(s.daily_strategy)):
+    if not auto_due(now, store.latest_daily()):
         return False
     _attempts.setdefault(now.date().isoformat(), []).append(time.time())
-    return start_background(router, cache, store, strategy=s.daily_strategy, stock_count=s.daily_stock_count,
-                            use_llm=s.daily_llm, skip_if_exists=True)
+    return start_background(router, cache, store, stock_count=s.daily_stock_count, use_llm=s.daily_llm,
+                            skip_if_exists=True)
 
 
 def auto_loop(router, cache, store, stop: threading.Event, first_delay: float = 60, interval: float = 600) -> None:
