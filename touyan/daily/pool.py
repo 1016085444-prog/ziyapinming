@@ -1,26 +1,44 @@
-"""核心池：市值最大的几百只股票的日 K 线。短期、中期两个板块从这里找机会，也用它检验方法。
+"""股票池：全市场里成交够活跃的股票（约三四千只）的日线。大盘预估、短期、中期三样都从这里来。
 
-为什么用一个固定的池子，而不是「今天看着不错的那几十只」：检验方法要回到过去每一天去看当时有没有信号。
-只拿今天的候选回头检验，结果必然好看——它们正是因为过去走得好才入选的。
-池子按市值选，和今天有没有信号无关；检验时再拿「同一批股票随便哪天买」做对照，
-把这批股票本身涨得好的部分扣掉，剩下的才算方法的功劳。
+为什么要这么大的池子：
+- 「大盘预估」看的是全市场的状态——多少只涨停跌停、整体放量还是缩量——只看几百只大盘股量不出来；
+- 短期、中期的选股规则在中小市值的股票里才有效（在市值最大的那批里基本无效），池子里得有它们；
+- 「冷热分」是在全市场里排名次，池子越全，名次越准。
+
+池子按「成交够不够活跃」来定（近 20 个交易日日均成交 5000 万以上、上市满一年、不是 ST），
+和今天有没有信号无关——拿今天看着不错的那批股票回头检验，结果必然好看。
+
+行情用等比复权（见 market/tencent.py 的 kline_true），每天的涨跌幅和当时实际发生的一样。
+几千只股票的日线占内存，所以每只只留 开/高/低/收/成交额 五列，用紧凑数组存；当天下载过的整池存成一个文件，
+同一个交易日里重新生成不用再下载。
 """
 
 from __future__ import annotations
 
-import math
+import json
+import zlib
+from array import array
+from bisect import bisect_left
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 
-from market import symbols
 from market.models import Bar
-from market.router import bars_to_rows, rows_to_bars
-from quant import indicators as ind
 
 from .common import limit_pct, tradable
 
-POOL_SIZE = 300
-POOL_DAYS = 380            # 约一年半；腾讯证券一次请求就能取全
-MIN_BARS = 200
+POOL_DAYS = 640            # 约两年半；腾讯证券一次请求最多 640 根
+MIN_BARS = 260             # 上市满一年（冷热分要回看 250 个交易日）
+MIN_AMOUNT = 5e7           # 近 20 个交易日的日均成交额
+MAX_POOL = 4500            # 防御：快照异常时不至于去下载整个市场
+MAGIC = b"TYPOOL1\n"
+
+
+def day_int(text: str) -> int:
+    return int(text[:4]) * 10000 + int(text[5:7]) * 100 + int(text[8:10])
+
+
+def day_text(d: int) -> str:
+    return f"{d // 10000}-{d // 100 % 100:02d}-{d % 100:02d}"
 
 
 def _usable(rows: list[dict], field: str) -> bool:
@@ -29,110 +47,67 @@ def _usable(rows: list[dict], field: str) -> bool:
     return have >= len(rows) * 0.5
 
 
-def build_pool(rows: list[dict], size: int = POOL_SIZE) -> list[dict]:
-    """可交易、成交够活跃的股票里，市值最大的 size 只。"""
+def build_pool(rows: list[dict]) -> list[dict]:
+    """要下载日线的名单：可交易、今天成交不太冷清的。最终进不进池子，下载之后按 20 日均成交额和上市时间再定。"""
     rows = [r for r in rows if tradable(r)]
     if _usable(rows, "amount"):
-        rows = [r for r in rows if (r.get("amount") or 0) >= 1e8]
-    key = "total_mv" if _usable(rows, "total_mv") else "amount"
-    return sorted((r for r in rows if r.get(key)), key=lambda r: -r[key])[:size]
+        rows = sorted((r for r in rows if (r.get("amount") or 0) >= MIN_AMOUNT * 0.6), key=lambda r: -r["amount"])
+    elif _usable(rows, "total_mv"):                 # 盘中倒推的快照没有成交额：按市值取
+        rows = sorted((r for r in rows if r.get("total_mv")), key=lambda r: -r["total_mv"])[:4000]
+    return rows[:MAX_POOL]
 
 
-def _prefix(values) -> list[float]:
-    out, total = [0.0], 0.0
-    for v in values:
-        total += v
-        out.append(total)
-    return out
+class Stock:
+    """一只股票的日线（等比复权）。dates 是 20261113 这样的整数；a 是成交额（元）。"""
 
+    __slots__ = ("code", "market", "name", "dates", "o", "h", "l", "c", "a", "limit", "n", "float_mv")
 
-class Series:
-    """一只股票（或 ETF）的日线。预先算好前缀和，回看任意一段的统计都是 O(1)。"""
+    def __init__(self, code: str, market: str, name: str, dates, o, h, l, c, a, float_mv: float | None = None):
+        self.code, self.market, self.name = code, market, name
+        self.dates, self.o, self.h, self.l, self.c, self.a = dates, o, h, l, c, a
+        self.n = len(dates)
+        self.limit = limit_pct(code, market)
+        self.float_mv = float_mv
 
-    def __init__(self, bars: list[Bar], code: str = "", market: str = "SH", name: str = "", limit: float | None = None):
-        n = len(bars)
-        self.code, self.market, self.name, self.n = code, market, name, n
-        self.dates = [b.date for b in bars]
-        self.o = [b.open for b in bars]
-        self.h = [b.high for b in bars]
-        self.l = [b.low for b in bars]
-        self.c = [b.close for b in bars]
-        self.v = [b.volume or 0.0 for b in bars]
-        self.limit = limit if limit is not None else limit_pct(code, market)
-        edge = self.limit - 0.004
-        r, lin, lon = [0.0] * n, [0.0] * n, [0.0] * n
-        up, down = [0] * n, [0] * n
-        for i in range(1, n):
-            pc, o, c = self.c[i - 1], self.o[i], self.c[i]
-            if pc > 0 and o > 0 and c > 0:
-                r[i] = c / pc - 1
-                lon[i] = math.log(o / pc)            # 隔夜：昨收 → 今开
-                lin[i] = math.log(c / o)             # 盘中：今开 → 今收
-                up[i] = 1 if r[i] >= edge else 0
-                down[i] = 1 if r[i] <= -edge else 0
-        self.r, self.lin, self.lon = r, lin, lon
-        self.p_r, self.p_r2 = _prefix(r), _prefix(x * x for x in r)
-        self.p_lin, self.p_v = _prefix(lin), _prefix(self.v)
-        self.p_up, self.p_down = _prefix(up), _prefix(down)
-        self.p_pos = _prefix(1 if x > 0 else 0 for x in r)
-        y = [math.log(c) if c > 0 else 0.0 for c in self.c]
-        self.p_y, self.p_y2 = _prefix(y), _prefix(v * v for v in y)
-        self.p_iy = _prefix(i * v for i, v in enumerate(y))
+    @classmethod
+    def from_bars(cls, bars: list[Bar], code: str, market: str = "SH", name: str = "") -> "Stock":
+        last = bars[-1] if bars else None
+        mv = last.amount / (last.turnover / 100) if last and last.amount and last.turnover else None
+        return cls(code, market, name,
+                   array("i", (day_int(b.date) for b in bars)),
+                   array("f", (b.open for b in bars)), array("f", (b.high for b in bars)),
+                   array("f", (b.low for b in bars)), array("f", (b.close for b in bars)),
+                   array("f", (b.amount or 0.0 for b in bars)), mv)
 
-    @staticmethod
-    def span(p: list[float], a: int, b: int) -> float:
-        """第 a 到第 b 根（含两端）的合计。"""
-        return p[b + 1] - p[a]
+    @property
+    def key(self) -> str:
+        return f"{self.market}:{self.code}"
 
-    def ret(self, t: int, k: int) -> float:
-        return self.c[t] / self.c[t - k] - 1
+    def index(self, day: int) -> int:
+        """这一天是第几根；当天没交易（停牌、还没上市）返回 -1。"""
+        i = bisect_left(self.dates, day)
+        return i if i < self.n and self.dates[i] == day else -1
 
-    def sigma(self, t: int, window: int = 120, skip: int = 5) -> float | None:
-        """日涨跌幅的标准差：取 t 之前 window 天，跳过最近 skip 天（不让这次下跌本身把波动抬高）。"""
-        b = t - skip
-        a = b - window + 1
-        if a < 1:
-            return None
-        s1, s2 = self.span(self.p_r, a, b), self.span(self.p_r2, a, b)
-        var = (s2 - s1 * s1 / window) / (window - 1)
-        return math.sqrt(var) if var > 0 else None
+    def ret(self, t: int) -> float:
+        return self.c[t] / self.c[t - 1] - 1 if t > 0 and self.c[t - 1] > 0 else 0.0
 
-    def intraday_share(self, t: int, k: int) -> float | None:
-        """最近 k 天的跌幅里，有多少是盘中跌出来的（其余是隔夜跳空）。只在下跌时有意义。"""
-        total = math.log(self.c[t] / self.c[t - k])
-        return self.span(self.p_lin, t - k + 1, t) / total if total < 0 else None
+    def limit_up(self, t: int) -> bool:
+        """收盘封在涨停：涨幅到了涨停幅度，并且收在全天最高。"""
+        return t > 0 and self.ret(t) >= self.limit - 0.004 and self.c[t] >= self.h[t] * 0.9995
 
-    def worst_gap(self, t: int, k: int) -> float:
-        return min(math.exp(self.lon[i]) - 1 for i in range(t - k + 1, t + 1))
+    def limit_down(self, t: int) -> bool:
+        return t > 0 and self.ret(t) <= -self.limit + 0.004 and self.c[t] <= self.l[t] * 1.0005
 
-    def limit_days(self, t: int, k: int) -> tuple[int, int]:
-        """最近 k 天里涨停、跌停各几天。"""
-        return (int(self.span(self.p_up, t - k + 1, t)), int(self.span(self.p_down, t - k + 1, t)))
+    def opens_at_limit(self, t: int) -> int:
+        """开盘就在涨停（1）或跌停（-1）价上，否则 0。"""
+        if t <= 0 or self.c[t - 1] <= 0:
+            return 0
+        gap = self.o[t] / self.c[t - 1] - 1
+        return 1 if gap >= self.limit - 0.004 else -1 if gap <= -self.limit + 0.004 else 0
 
-    def clv(self, t: int) -> float:
-        """收盘在当天最低到最高之间的位置，0 = 收在最低，1 = 收在最高。"""
-        span = self.h[t] - self.l[t]
-        return (self.c[t] - self.l[t]) / span if span > 0 else 0.5
-
-    def avg_vol(self, t: int, k: int) -> float:
-        return self.span(self.p_v, t - k + 1, t) / k
-
-    def up_ratio(self, t: int, k: int) -> float:
-        return self.span(self.p_pos, t - k + 1, t) / k
-
-    def max_gain(self, t: int, k: int) -> float:
-        return max(self.r[t - k + 1:t + 1])
-
-    def trend(self, t: int, k: int) -> tuple[float, float]:
-        """最近 k 天对数价格对时间的直线拟合：(R²，每天的斜率)。R² 越接近 1，走得越像一条直线。"""
-        a, b = t - k + 1, t
-        sx = (a + b) * k / 2
-        sxx = (b * (b + 1) * (2 * b + 1) - (a - 1) * a * (2 * a - 1)) / 6
-        sy, syy, sxy = self.span(self.p_y, a, b), self.span(self.p_y2, a, b), self.span(self.p_iy, a, b)
-        cov, var_x, var_y = sxy - sx * sy / k, sxx - sx * sx / k, syy - sy * sy / k
-        if var_x <= 0 or var_y <= 1e-12:
-            return 0.0, 0.0
-        return min(1.0, cov * cov / (var_x * var_y)), cov / var_x
+    def avg_amount(self, t: int, k: int = 20) -> float:
+        a = max(0, t - k + 1)
+        return sum(self.a[a:t + 1]) / (t - a + 1)
 
 
 def clean(bars: list[Bar]) -> bool:
@@ -140,45 +115,67 @@ def clean(bars: list[Bar]) -> bool:
     return all(b.open > 0 and b.close > 0 and b.high > 0 and b.low > 0 for b in bars)
 
 
-def regime_by_date(bench: list[Bar]) -> dict[str, str]:
-    """每个交易日的市场环境（只看沪深300 的走势）：三项都好算偏强，三项都差算偏弱，其余算震荡。"""
-    closes = [b.adj_close for b in bench]
-    ma20, ma60 = ind.sma(closes, 20), ind.sma(closes, 60)
-    out = {}
-    for i in range(60, len(bench)):
-        score = ((1 if closes[i] >= ma20[i] else -1) + (1 if ma20[i] >= ma60[i] else -1)
-                 + (1 if closes[i] > closes[i - 20] else -1))
-        out[bench[i].date] = "偏强" if score == 3 else "偏弱" if score == -3 else "震荡"
-    return out
+# ── 整池存成一个文件 ──────────────────────────────────────────────
+
+def save_pool(path: Path | str | None, as_of: str, stocks: dict[str, Stock]) -> None:
+    if path is None:
+        return
+    head = {"as_of": as_of, "stocks": [[s.code, s.market, s.name, s.n, s.float_mv] for s in stocks.values()]}
+    body = b"".join(col.tobytes() for s in stocks.values() for col in (s.dates, s.o, s.h, s.l, s.c, s.a))
+    blob = MAGIC + zlib.compress(json.dumps(head, ensure_ascii=False).encode("utf-8") + b"\n" + body, 1)
+    tmp = Path(str(path) + ".tmp")
+    tmp.write_bytes(blob)
+    tmp.replace(path)
 
 
-def load_bars(router, cache, key: str, name: str, kind: str, as_of: str, partial: str | None, days: int) -> list[Bar]:
-    """取一只的日线。同一个交易日里取过就不再取（重新生成、自动任务之后手动再点，都不用重新下载）。"""
-    ck = f"poolk:{key}:{days}"
-    hit = cache.get_stale(ck, 6 * 86400)
-    if hit and hit[0].get("as_of") == as_of:
-        return rows_to_bars(hit[0]["rows"])
-    inst = symbols.from_key(key, kind, name)
-    bars, _ = router.series(inst, days)
-    if partial and bars and bars[-1].date == partial:
-        bars = bars[:-1]                                   # 今天还没走完的那根不用
-    if bars and bars[-1].date == as_of:
-        cache.set(ck, {"as_of": as_of, "rows": bars_to_rows(bars)})
-    return bars
+def load_saved(path: Path | str | None, as_of: str) -> dict[str, Stock] | None:
+    """同一个交易日存下的整池；不是这一天的、读不了的都返回 None（重新下载）。"""
+    try:
+        blob = Path(path).read_bytes() if path is not None else b""
+        if not blob.startswith(MAGIC):
+            return None
+        raw = zlib.decompress(blob[len(MAGIC):])
+        cut = raw.index(b"\n")
+        head = json.loads(raw[:cut].decode("utf-8"))
+        if head.get("as_of") != as_of:
+            return None
+        out, pos = {}, cut + 1
+        for code, market, name, n, mv in head["stocks"]:
+            cols = []
+            for typecode in "ifffff":
+                col = array(typecode)
+                size = col.itemsize * n
+                col.frombytes(raw[pos:pos + size])
+                pos += size
+                cols.append(col)
+            out[code] = Stock(code, market, name, *cols, float_mv=mv)
+        return out
+    except (OSError, ValueError, KeyError, zlib.error):
+        return None
 
 
-def load_pool(router, cache, rows: list[dict], as_of: str, partial: str | None, progress=None,
-              days: int = POOL_DAYS) -> tuple[dict[str, Series], dict]:
-    """返回 ({代码: Series}, 统计)。取不到、停牌、上市太短的都不进池子。"""
+# ── 下载 ──────────────────────────────────────────────────────────
+
+def load_pool(fetch, rows: list[dict], as_of: str, partial: str | None = None, progress=None,
+              path: Path | str | None = None, days: int = POOL_DAYS, workers: int = 8) -> tuple[dict[str, Stock], dict]:
+    """返回 ({代码: Stock}, 统计)。fetch(row, days) → 日线（等比复权）。
+    取不到、今天没交易（停牌）、上市不满一年、成交太冷清的都不进池子。"""
+    saved = load_saved(path, as_of)
+    if saved is not None and len(saved) >= len(rows) * 0.5:
+        return saved, {"wanted": len(rows), "loaded": len(saved), "failed": 0, "stale": 0, "short": 0, "thin": 0, "cached": True}
+
     def one(r):
-        return load_bars(router, cache, f"{r['market']}:{r['code']}", r.get("name", ""), "stock", as_of, partial, days)
+        bars = fetch(r, days)
+        if partial and bars and bars[-1].date == partial:
+            bars = bars[:-1]                                # 今天还没走完的那根不用
+        return bars
 
-    out: dict[str, Series] = {}
-    failed = stale = short = 0
-    with ThreadPoolExecutor(max_workers=6) as ex:
+    out: dict[str, Stock] = {}
+    failed = stale = short = thin = 0
+    with ThreadPoolExecutor(max_workers=workers) as ex:
         futures = [(r, ex.submit(one, r)) for r in rows]
         for i, (r, fut) in enumerate(futures, 1):
-            if progress and (i % 10 == 0 or i == len(futures)):
+            if progress and (i % 20 == 0 or i == len(futures)):
                 progress(i, len(futures))
             try:
                 bars = fut.result()
@@ -188,7 +185,17 @@ def load_pool(router, cache, rows: list[dict], as_of: str, partial: str | None, 
             if not bars or bars[-1].date != as_of:
                 stale += 1                                  # 停牌，或者这只的数据没更新到这一天
             elif len(bars) < MIN_BARS or not clean(bars):
-                short += 1                                  # 上市太短，或者行情里有 0 这样的坏数据
+                short += 1                                  # 上市不满一年，或者行情里有 0 这样的坏数据
             else:
-                out[r["code"]] = Series(bars, r["code"], r["market"], r.get("name", ""))
-    return out, {"wanted": len(rows), "loaded": len(out), "failed": failed, "stale": stale, "short": short}
+                s = Stock.from_bars(bars, r["code"], r["market"], r.get("name", ""))
+                if s.avg_amount(s.n - 1) < MIN_AMOUNT:
+                    thin += 1                               # 成交太冷清
+                else:
+                    out[r["code"]] = s
+    info = {"wanted": len(rows), "loaded": len(out), "failed": failed, "stale": stale, "short": short, "thin": thin, "cached": False}
+    if out and failed <= len(rows) * 0.2:                   # 下载得不全的不存，下次重新来
+        try:
+            save_pool(path, as_of, out)
+        except OSError:
+            pass
+    return out, info

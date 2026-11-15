@@ -1,7 +1,7 @@
-"""每日精选的一次完整运行：大盘 → 核心池 → 短期 / 中期 / 长期 / 定投四个板块 →（可选）大模型点评 → 保存。
+"""每日精选的一次完整运行：大盘 → 股票池 → 大盘预估 → 短期 / 中期 / 长期 / 定投四个板块 →（可选）大模型点评 → 保存。
 
-四个板块用四种不同的方法（见 short.py、mid.py、longterm.py、dca.py），各自先拿历史数据检验自己，
-再给出今天的入选和每一只的持有计划。一次运行要下载几百只股票的日线，约 3–5 分钟；
+四个板块用四种不同的方法（见 short.py、mid.py、longterm.py、dca.py）。短期和中期先看「大盘预估分」（gauge.py）：
+分数不够，短期板块就空仓。一次运行要下载全市场三四千只活跃股票的日线，第一次约 5–8 分钟；
 同一个交易日里重新生成会直接用已经下载的数据。个别标的取不到会跳过并记在 warnings 里，不会让整次运行失败。
 """
 
@@ -13,16 +13,17 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 import config
 from agents.llm import LLMError, make_llm, strip_think
-from market import eastmoney, symbols, universe
+from market import eastmoney, symbols, tencent, universe
 from market.models import FinancialPeriod, Instrument
 from market.net import SourceError
+from market.router import bars_to_rows, rows_to_bars
 from quant import report as qr
 
-from . import dca, longterm, mid, pool, short
+from . import dca, features, gauge, longterm, mid, pool, short
 from . import market as mkt
 from .common import guess_industry
 
@@ -31,7 +32,8 @@ BJ = timezone(timedelta(hours=8))
 BOARDS_KEY = "boards"
 ORDER = ("short", "mid", "long", "dca")
 DISCLAIMER = ("每日精选由公开数据和固定规则自动生成，用来缩小研究范围，不是买卖指令，也不构成投资建议。"
-              "「预期收益」是历史统计或按财报的推算，不是承诺；每个板块都写明了方法在历史上的检验结果，请结合它和自己的判断使用。")
+              "「预期收益」是历史统计或按财报的推算，不是承诺——历史上有效的规律将来可能失效，每一笔都可能亏；"
+              "每个板块都写明了方法在历史上的检验结果和最差的情况，请结合它和自己的判断使用。")
 
 
 def beijing_now() -> datetime:
@@ -164,29 +166,51 @@ def make_financials(router, cache):
     return many
 
 
-def load_etfs(router, cache, as_of: str, partial: str | None) -> tuple[dict, dict, list[str]]:
-    """ETF 池的日线（三年多，检验要用）。返回 ({代码: Series}, {代码: (key, 名称, 类别)}, 提示)。"""
-    def one(item):
-        code, name, _ = item
-        key = ("SH:" if code[0] in "56" else "SZ:") + code
-        return key, pool.load_bars(router, cache, key, name, "etf", as_of, partial, 800)
+def pool_fetch(router):
+    """股票池的取数：腾讯证券的等比复权日线；腾讯取不到时退回普通行情源（前复权，两年半内差别很小）。"""
+    def fetch(row: dict, days: int):
+        prefix = {"SH": "sh", "SZ": "sz", "BJ": "bj"}.get(row["market"], "sz")
+        try:
+            return tencent.kline_true(prefix + row["code"], days)
+        except SourceError:
+            inst = symbols.from_key(f"{row['market']}:{row['code']}", "stock", row.get("name", ""))
+            return router.series(inst, days)[0]
+    return fetch
 
-    series, meta, failed = {}, {}, []
-    with ThreadPoolExecutor(max_workers=4) as ex:
-        futures = [(item, ex.submit(one, item)) for item in mid.ETF_POOL]
-        for (code, name, group), fut in futures:
-            try:
-                key, bars = fut.result()
-            except Exception:
-                failed.append(name)
-                continue
-            if bars and bars[-1].date == as_of and len(bars) >= pool.MIN_BARS and pool.clean(bars):
-                series[code] = pool.Series(bars, code, key[:2], name, limit=0.10)
-                meta[code] = (key, name, group)
-            else:
-                failed.append(name)
-    warnings = [f"有 {len(failed)} 只 ETF 的行情没取到：{'、'.join(failed[:5])}"] if failed else []
-    return series, meta, warnings
+
+def load_bars(router, cache, key: str, name: str, kind: str, as_of: str, partial: str | None, days: int) -> list:
+    """取一只的日线。同一个交易日里取过就不再取。"""
+    ck = f"poolk:{key}:{days}"
+    hit = cache.get_stale(ck, 6 * 86400)
+    if hit and hit[0].get("as_of") == as_of:
+        return rows_to_bars(hit[0]["rows"])
+    bars, _ = router.series(symbols.from_key(key, kind, name), days)
+    bars = drop_partial(bars, partial)
+    if bars and bars[-1].date == as_of:
+        cache.set(ck, {"as_of": as_of, "rows": bars_to_rows(bars)})
+    return bars
+
+
+def load_reports(cache, as_of: str) -> tuple[dict, list[str]]:
+    """全市场最新财报摘要（净利润同比、行业）。取不到时中期板块不检查利润增长，并提示。"""
+    try:
+        return universe.latest_reports(cache, date.fromisoformat(as_of)), []
+    except SourceError as exc:
+        return {}, [f"全市场财报摘要取不到：{exc}"]
+
+
+def etf_quotes(router, cache, as_of: str, partial: str | None) -> dict[str, dict]:
+    """短期板块里那几只宽基 ETF 的最新收盘价（用来估止损价）。取不到就不显示价格。"""
+    wanted = {(key, code, name) for group in short.ETFS.values() for key, code, name, _ in group}
+    out = {}
+    for key, code, name in wanted:
+        try:
+            bars = load_bars(router, cache, key, name, "etf", as_of, partial, 30)
+            if bars and bars[-1].date == as_of:
+                out[code] = {"close": bars[-1].close}
+        except Exception:
+            continue
+    return out
 
 
 def pick_long_funds(router, cache, bench: list, rf: float, n: int = 3) -> tuple[dict, list[str]]:
@@ -250,6 +274,7 @@ def pick_dca(router, cache, n: int = 5) -> tuple[dict, list[str]]:
 COMMENT_SYSTEM = (
     "你是一名谨慎的投研助理。根据用户给的结构化数据写今日点评，400 字以内：先一句话说大盘环境，"
     "再按短期、中期、长期、定投四个板块各写两三句——这个板块的方法在历史检验里表现如何、今天选了什么、最该注意什么。"
+    "短期板块先说大盘预估分和结论：如果结论是不出手，就直说今天不做短线、为什么，不要另外推荐股票。"
     "只能引用数据里出现的数字和事实，不编造新闻、业绩或价格；方法检验结果不好的板块要直说；"
     "不使用「必涨」「稳赚」「强烈推荐」这类词；最后一句提醒：仅供研究参考，不构成投资建议。"
 )
@@ -262,15 +287,24 @@ def commentary(payload: dict) -> tuple[str | None, str]:
         return None, reason
 
     def brief(board: dict) -> dict:
-        picks = list(board["picks"]) + (board.get("etfs") or {}).get("picks", []) + (board.get("funds") or {}).get("picks", [])
-        return {"方法": board["name"], "持有": board["horizon"], "历史检验": board["checkup"].get("verdict", ""),
-                "入选": [{"名称": p["name"], "一句话": p["headline"], "预期": p["plan"]["expected"].get("text", "")[:120]}
-                       for p in picks[:6]]}
+        picks = list(board["picks"]) + (board.get("funds") or {}).get("picks", [])
+        out = {"方法": board["name"], "持有": board["horizon"], "历史检验": board["checkup"].get("verdict", ""),
+               "入选": [{"名称": p["name"], "一句话": p["headline"], "预期": p["plan"]["expected"].get("text", "")[:120]}
+                      for p in picks[:6]]}
+        if board.get("stance"):
+            out["今天的结论"] = board["stance"]["label"] + "：" + board["stance"]["text"]
+            out["可选的ETF"] = [e["name"] for e in (board.get("etfs") or {}).get("picks", [])]
+        if board.get("timing"):
+            out["买入时机"] = board["timing"]["text"]
+        return out
 
+    g = payload.get("gauge") or {}
     data = {
         "日期": payload["as_of"],
-        "大盘": {"市场温度": payload["market"]["regime"]["label"], "依据": payload["market"]["regime"]["notes"],
-               "指数": [{i["name"]: i["change_pct"]} for i in payload["market"]["indices"]]},
+        "大盘": {"指数走势": payload["market"]["regime"]["label"], "依据": payload["market"]["regime"]["notes"],
+               "指数": [{i["name"]: i["change_pct"]} for i in payload["market"]["indices"]],
+               "大盘预估分": g.get("score"), "结论": g.get("label"), "触发项": [p["label"] for p in g.get("parts", []) if p["on"]],
+               "风格": (g.get("style") or {}).get("label")},
         **{payload["boards"][k]["title"]: brief(payload["boards"][k]) for k in ORDER},
     }
     try:
@@ -313,8 +347,11 @@ def as_of_label(as_of: str, now: datetime, intraday: bool) -> str:
 
 
 def run(router, cache, store, stock_count: int = 5, use_llm: bool = True, on_progress=None,
-        skip_if_exists: bool = False) -> dict | None:
-    """返回保存好的结果。skip_if_exists=True 且这个交易日已经有结果时返回 None（自动任务用）。"""
+        skip_if_exists: bool = False, pool_path=...) -> dict | None:
+    """返回保存好的结果。skip_if_exists=True 且这个交易日已经有结果时返回 None（自动任务用）。
+    pool_path：当天下载的股票池存在哪个文件里（默认在数据目录下；传 None 不存）。"""
+    if pool_path is ...:
+        pool_path = config.DATA_DIR / "daily_pool.bin"
     t0 = time.time()
     n = max(3, min(10, int(stock_count or 5)))
     rf = config.load().risk_free_rate / 100
@@ -340,58 +377,69 @@ def run(router, cache, store, stock_count: int = 5, use_llm: bool = True, on_pro
             existing["reused"] = True
             return existing
     rows, snap_source, warnings, basis = close_snapshot(cache, as_of, intraday, now)
-    boards = []
-    if not intraday:                                           # 盘中的行业涨跌是今天的半场数据，不展示
-        try:
-            boards = universe.industry_boards(cache)
-        except SourceError as exc:
-            warnings.append(f"行业板块取不到：{exc}")
-    market = mkt.overview(router, rows if basis != "derived" else [], boards, bench, partial)
-    warnings += market.pop("warnings")
-    regimes = pool.regime_by_date(bench)
-    regime_now = regimes.get(as_of, "震荡")
-    bench60 = mid.bench_returns(bench)
     rows_by_code = {r["code"]: r for r in rows}
     financials = make_financials(router, cache)
+    calendar = [pool.day_int(b.date) for b in bench]
+
+    progress("财报", "读取全市场最新一期财报摘要", 3)
+    reports, rep_warn = load_reports(cache, as_of)
+    warnings += rep_warn
+    industry = {c: r["industry"] for c, r in reports.items() if r.get("industry")}
+    for r in rows:                                             # 行业顺手补上，长期板块就不用再单独去取
+        if not r.get("industry") and r["code"] in industry:
+            r["industry"] = industry[r["code"]]
 
     pool_rows = pool.build_pool(rows)
-    series, pool_info = pool.load_pool(
-        router, cache, pool_rows, as_of, partial,
-        progress=lambda i, total: progress("核心池", f"下载市值最大的 {total} 只股票的日线（{i}/{total}）", 4 + 41 * i / total))
+    stocks, pool_info = pool.load_pool(
+        pool_fetch(router), pool_rows, as_of, partial, path=pool_path,
+        progress=lambda i, total: progress("股票池", f"下载全市场活跃股票的日线（{i}/{total}）", 5 + 43 * i / total))
     if pool_info["wanted"] and pool_info["failed"] > pool_info["wanted"] * 0.2:
-        warnings.append(f"核心池里有 {pool_info['failed']} 只股票的日线没取到（数据源可能在限流），"
-                        "短期和中期板块是在剩下的股票里选的，过一会儿重新生成可以补全")
-    plist = list(series.values())
+        warnings.append(f"股票池里有 {pool_info['failed']} 只股票的日线没取到（数据源可能在限流），"
+                        "大盘预估和短期、中期板块是在剩下的股票里算的，过一会儿重新生成可以补全")
 
-    progress("短期", "检验方法，找今天被错杀的股票", 47)
-    b_short = guarded(short, lambda: short.select(series, rows_by_code, short.checkup(plist, regimes, regime_now),
-                                                  regime_now, n, fill_industries), warnings)
+    market = mkt.overview(router, rows if basis != "derived" else [], gauge.sector_moves(stocks, industry), bench, partial)
+    warnings += market.pop("warnings")
 
-    progress("中期", "检验方法，找悄悄走强的股票", 52)
-    b_mid = guarded(mid, lambda: mid.select(series, rows_by_code, bench60, mid.checkup(plist, bench60, regimes, regime_now),
-                                            n, financials, fill_industries), warnings)
-    progress("中期", "下载 ETF 行情", 58)
-
-    def etf_section():
-        etf_series, etf_meta, etf_warn = load_etfs(router, cache, as_of, partial)
-        warnings.extend(etf_warn)
-        report = mid.checkup(list(etf_series.values()), bench60, regimes, regime_now, mid.ETF_RULE, "三年")
-        return mid.select_etfs(etf_series, etf_meta, bench60, report)
-
+    progress("大盘预估", "给今天的市场打分", 50)
+    g = None
     try:
-        b_mid["etfs"] = etf_section()
+        g = gauge.compute(stocks, calendar, industry)
     except Exception as exc:
-        log.exception("ETF 小节生成失败")
-        warnings.append(f"中期板块的 ETF 部分生成失败（{type(exc).__name__}: {exc}）")
+        log.exception("大盘预估失败")
+        warnings.append(f"大盘预估没有算出来（{type(exc).__name__}: {exc}），短期和中期板块这次是空的")
+    crosses = {}
+    if g:
+        days = {calendar[-1]} | set(mid.sample_days(calendar))
+        days |= {pool.day_int(h["date"]) for h in [h for h in g["history"] if h["score"] >= gauge.GO][-20:]}
+        crosses = features.crosses(stocks, sorted(days))
+
+    progress("短期", "看大盘够不够出手，再选股", 54)
+
+    def short_board():
+        if not g:
+            raise RuntimeError("大盘预估没有算出来")
+        quotes = etf_quotes(router, cache, as_of, partial) if g["score"] >= gauge.LIGHT else {}
+        return short.select(stocks, crosses, g, rows_by_code, industry, as_of, n, quotes)
+
+    b_short = guarded(short, short_board, warnings)
+
+    progress("中期", "找没人追、利润在增长的股票", 60)
+
+    def mid_board():
+        if not g:
+            raise RuntimeError("大盘预估没有算出来")
+        return mid.select(stocks, crosses, g, rows_by_code, reports, calendar, as_of, n)
+
+    b_mid = guarded(mid, mid_board, warnings)
 
     progress("长期", "读财报，估算长期回报", 66)
 
     def closes_of(row):
-        s = series.get(row["code"])
+        s = stocks.get(row["code"])
         if s is not None:
-            return s.c
-        bars = pool.load_bars(router, cache, f"{row['market']}:{row['code']}", row.get("name", ""), "stock",
-                              as_of, partial, pool.POOL_DAYS)
+            return list(s.c)
+        bars = load_bars(router, cache, f"{row['market']}:{row['code']}", row.get("name", ""), "stock",
+                         as_of, partial, 380)
         return [b.close for b in bars]
 
     b_long = guarded(longterm, lambda: longterm.select(rows, n, financials, fill_industries, closes_of), warnings)
@@ -419,7 +467,8 @@ def run(router, cache, store, stock_count: int = 5, use_llm: bool = True, on_pro
         "version": 2, "as_of": as_of, "as_of_label": as_of_label(as_of, now, intraday),
         "created_at": now.strftime("%Y-%m-%d %H:%M:%S"), "intraday": intraday, "basis": basis,
         "strategy": {"key": BOARDS_KEY, "label": "四个板块"},
-        "market": market, "regime_bucket": regime_now, "boards": result, "order": list(ORDER),
+        "market": market, "regime_bucket": market["regime"]["label"], "boards": result, "order": list(ORDER),
+        "gauge": {k: g[k] for k in ("score", "stance", "label", "basis", "parts", "facts", "style")} if g else None,
         "pool": pool_info, "sources": {"全市场快照": snap_source},
         "warnings": list(dict.fromkeys(warnings)), "commentary": None, "disclaimer": DISCLAIMER,
     }

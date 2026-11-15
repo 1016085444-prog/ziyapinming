@@ -1136,7 +1136,7 @@
       if (st.running) {
         fill(status, h('div', null, h('span', { class: 'spinner' }), ' ', (st.stage ? st.stage + '：' : '') + (st.message || '')),
           h('div', { class: 'meter' }, h('i', { style: { width: (st.percent || 0) + '%' } })),
-          h('div', { class: 'small muted' }, '要下载几百只股票的行情、逐个检验方法，大约 3–5 分钟。可以先去别的页面，回来再看。'));
+          h('div', { class: 'small muted' }, '每天第一次要下载全市场三四千只活跃股票的日线，大约 5–8 分钟；同一天再生成只要一两分钟。可以先去别的页面，回来再看。'));
       } else {
         fill(status, h('span', { class: 'bad-mark' }, '上次生成失败：'), st.error);
       }
@@ -1188,11 +1188,11 @@
     if (!isNew) {
       setView(head, tools, status, card(null, null, h('div', { class: 'empty' },
         p ? '这条记录是旧版本生成的，结构和现在的四个板块不同。' + (meta.can_run ? '点右上角重新生成。' : '')
-          : (meta.can_run ? '还没有生成过。点右上角「生成今日精选」，大约 3–5 分钟。' : '还没有生成过。'))), dailyHistory(null));
+          : (meta.can_run ? '还没有生成过。点右上角「生成今日精选」，第一次大约 5–8 分钟。' : '还没有生成过。'))), dailyHistory(null));
       return;
     }
 
-    var boardBox = h('div');
+    var boardBox = h('div', { class: 'board-box' });
     var current = LS.get('dailyBoard', 'short');
     if (!p.boards[current]) current = 'short';
     function show(key) {
@@ -1207,7 +1207,7 @@
     show(current);
 
     setView(head, tools, status,
-      dailyMarket(p.market),
+      dailyMarket(p.market, p.gauge),
       p.commentary ? card('今日点评', '大模型根据下面的数据撰写，只引用了数据里的数字',
         h('div', { class: 'md', html: window.MD.render(p.commentary) })) : null,
       tabs, boardBox, dailyHistory(p.id),
@@ -1215,16 +1215,22 @@
       h('p', { class: 'small muted' }, p.disclaimer));
   }
 
-  function dailyMarket(m) {
+  var STANCE_CLS = { go: 'st-go', light: 'st-light', wait: 'st-wait', avoid: 'st-avoid' };
+
+  function scoreText(n) { return (n > 0 ? '+' : n < 0 ? '−' : '') + Math.abs(n); }
+
+  function dailyMarket(m, g) {
     var reg = m.regime;
     var br = m.breadth;
     function boardChips(list) {
       return list.map(function (b) { return h('span', { class: 'badge' }, b.name + ' ', h('span', { class: F.cls(b.change_pct) }, F.pp(b.change_pct))); });
     }
     return card('大盘', null,
-      h('div', { class: 'regime ' + (reg.label === '偏强' ? 'is-up' : reg.label === '偏弱' ? 'is-down' : 'is-flat') },
-        h('strong', null, '市场温度：' + reg.label), reg.advice,
-        h('div', { class: 'small muted' }, reg.notes.join(' · '))),
+      g ? h('div', { class: 'regime ' + (STANCE_CLS[g.stance] || '') },
+        h('strong', null, '大盘预估分 ' + scoreText(g.score) + ' · ' + g.label), g.basis,
+        h('div', { class: 'small muted' }, '走势：' + reg.label + '（' + reg.notes.join(' · ') + '）。打分的依据见「短期」板块。'))
+        : h('div', { class: 'regime ' + (reg.label === '偏强' ? 'is-up' : reg.label === '偏弱' ? 'is-down' : 'is-flat') },
+          h('strong', null, '走势：' + reg.label), h('div', { class: 'small muted' }, reg.notes.join(' · '))),
       m.indices.length ? h('div', { class: 'idx-row' }, m.indices.map(function (i) {
         return h('a', { class: 'idx', href: '#/a/' + encodeURIComponent(i.key) + '?kind=index' },
           h('div', { class: 'small muted' }, i.name), h('div', { class: 'iv' }, F.num(i.price)),
@@ -1246,16 +1252,33 @@
     var title = { ok: '方法体检：通过', weak: '方法体检：没通过', thin: '方法体检：样本不足', model: '预期收益怎么来的' }[level];
     var stats = null;
     if (c.n) {
-      var use = c.now || c;
-      stats = [h('div', { class: 'plan-stats' },
-        stat('出现过', c.n + ' 次'), stat('赚钱的占', Math.round(c.win_rate * 100) + '%'),
+      stats = h('div', { class: 'plan-stats' },
+        stat('检验了', c.n + ' 笔'), stat('赚钱的占', Math.round(c.win_rate * 100) + '%'),
         stat('平均每笔', F.pct(c.mean, 1), F.cls(c.mean)),
-        stat('同一批随便买', c.baseline === null || c.baseline === undefined ? '—' : F.pct(c.baseline, 1))),
-      h('div', { class: 'small muted' }, '过去' + (c.span || '') + '，在 ' + c.stocks + ' 只里按「第二天开盘买、买入当天不能卖、每笔扣 0.2% 成本」模拟。' +
-        '中位 ' + F.pct(c.median, 1) + '，平均拿 ' + Math.round(c.avg_days) + ' 个交易日。' +
-        (c.now ? '目前「' + c.regime + '」的市场环境下 ' + use.n + ' 次：赚钱的占 ' + Math.round(use.win_rate * 100) + '%，中位 ' + F.pct(use.median, 1) + '。' : ''))];
+        stat('同样的日子随便买', c.baseline === null || c.baseline === undefined ? '—' : F.pct(c.baseline, 1)));
     }
-    return h('div', { class: 'checkup lvl-' + level }, h('strong', null, title), h('div', null, c.verdict || ''), stats);
+    var more = c.more && c.more.length ? h('details', { class: 'small t2' }, h('summary', null, '检验的细节：对照、分年度、最差的情况'),
+      h('ul', null, c.more.map(function (x) { return h('li', null, x); }))) : null;
+    return h('div', { class: 'checkup lvl-' + level }, h('strong', null, title), h('div', null, c.verdict || ''), stats, more,
+      c.recent ? recentBox(c.recent) : null);
+  }
+
+  // 最近的实际表现：用池子自己最近的行情，按同样的规则回看
+  function recentBox(r) {
+    if (!r.n) return h('div', { class: 'small muted' }, '最近的行情里还没有可以回看的样本。');
+    var rows = (r.rows || []).map(function (x) {
+      return h('tr', null, h('td', null, x.date), x.score === undefined ? null : h('td', { class: 'n' }, scoreText(x.score)),
+        h('td', { class: 'n ' + F.cls(x.picks) }, F.pct(x.picks, 1)), h('td', { class: 'n ' + F.cls(x.market) }, F.pct(x.market, 1)));
+    });
+    var hasScore = (r.rows || []).some(function (x) { return x.score !== undefined; });
+    return h('details', { class: 'small t2' },
+      h('summary', null, '最近的实际表现：' + r.days + ' 个日子共 ' + r.n + ' 笔，' + Math.round(r.win_rate * 100) + '% 赚钱，平均每笔 ' + F.pct(r.mean, 1) +
+        (r.baseline === null || r.baseline === undefined ? '' : '（同样的日子随便买 ' + F.pct(r.baseline, 1) + '）')),
+      h('p', { class: 'muted', style: { margin: '6px 0' } }, '用今天这批股票最近两年的行情，按同样的规则回看（盈利与否、市值用的是现在的数据）。样本少，只能看个大概；上面十年的检验更可靠。'),
+      rows.length ? h('div', { class: 'table-wrap' }, h('table', { class: 'tbl' },
+        h('thead', null, h('tr', null, h('th', null, '信号日'), hasScore ? h('th', { class: 'n' }, '大盘分') : null,
+          h('th', { class: 'n' }, '按规则选的'), h('th', { class: 'n' }, '全市场随便买'))),
+        h('tbody', null, rows))) : null);
   }
 
   function planHeadline(pick) {
@@ -1299,7 +1322,8 @@
         h('div', { class: 'small' }, h('strong', null, '预期收益：'),
           ex.reliable === false && ex.available ? h('span', { class: 'bad-mark' }, '这个方法没通过历史检验，数字仅供参考。') : null, ex.text || ''),
         h('div', { class: 'small' }, h('strong', null, '什么时候卖：')),
-        h('ul', { class: 'plan-rules small' }, plan.rules.map(function (r) { return h('li', null, r); }))),
+        h('ul', { class: 'plan-rules small' }, plan.rules.map(function (r) { return h('li', null, r); })),
+        plan.stop_note ? h('div', { class: 'small muted' }, h('strong', null, '关于止损：'), plan.stop_note) : null),
       pick.risks && pick.risks.length ? h('div', { class: 'pick-advice small' }, h('div', null, h('strong', null, '风险：'), pick.risks.join('；'))) : null,
       h('div', { class: 'row' }, h('a', { class: 'btn btn-sm', href: href }, '完整体检'),
         pick.kind === 'stock' ? h('a', { class: 'btn btn-sm', href: href + '?tab=ai' }, 'AI 深度分析') : null));
@@ -1320,35 +1344,107 @@
     var f = b.funnel || {};
     var method = card(b.title + ' · ' + b.name, '持有 ' + b.horizon,
       h('p', { style: { marginTop: 0 } }, b.idea),
-      h('details', { class: 'small t2' }, h('summary', null, '入选条件（点开看）'), h('ul', null, b.how.map(function (x) { return h('li', null, x); }))),
+      h('details', { class: 'small t2' }, h('summary', null, b.gauge ? '四步是怎么走的（点开看）' : '入选条件（点开看）'), h('ul', null, b.how.map(function (x) { return h('li', null, x); }))),
       checkupBox(b.checkup));
     var funnelText = b.key === 'dca' ? '候选 ' + f.pool + ' 只指数基金 → 有足够历史的 ' + f.candidates + ' → 入选 ' + f.picked
       : b.key === 'long' ? '全市场 ' + f.pool + ' 只 → 初选 ' + f.candidates + ' → 财报过关 ' + f.passed + ' → 入选 ' + f.picked
-        : '核心池 ' + f.pool + ' 只 → 符合条件 ' + f.candidates + ' → 入选 ' + f.picked;
-    var picks = card(b.key === 'dca' ? '这个月适合定投的' : '今天入选的股票', funnelText,
-      b.note ? h('p', { class: 'small muted', style: { marginTop: 0 } }, b.note) : null,
-      pickList(b.picks, f, '今天没有符合条件的，宁缺毋滥。没入选的原因：'),
-      b.picks.length && reasonList(f) ? h('details', { class: 'small muted', style: { marginTop: '10px' } },
-        h('summary', null, '其余的为什么没入选'), reasonList(f)) : null);
-    return [method, picks, b.etfs ? etfSection(b.etfs) : null, b.funds ? fundSection(b.funds) : null, b.ranking ? dcaRanking(b.ranking) : null];
+        : b.key === 'mid' ? '股票池 ' + f.pool + ' 只 → 最冷的一成 ' + f.cold + ' → 市值、盈利、增长都过关 ' + f.candidates + ' → 入选 ' + f.picked
+          : '股票池 ' + f.pool + ' 只 → 符合选股条件 ' + f.candidates + ' → 入选 ' + f.picked;
+    var holding = b.stance && (b.stance.key === 'wait' || b.stance.key === 'avoid');
+    var picks = holding
+      ? card('今天不出手', '空仓也是一种操作',
+        h('div', { class: 'stance ' + STANCE_CLS[b.stance.key] }, h('strong', null, '大盘预估分 ' + scoreText(b.gauge.score) + '：' + b.stance.label),
+          h('div', null, b.stance.text),
+          h('div', { class: 'small muted' }, b.gauge.next_window.text + '。另外，哪天全市场放量、大涨大跌或者跌停很多，分数也会上来。')))
+      : card(b.key === 'dca' ? '这个月适合定投的' : b.gauge ? '第四步：今天入选的股票' : '今天入选的股票', funnelText,
+        b.timing ? h('div', { class: 'stance ' + STANCE_CLS[b.timing.level] }, h('strong', null, '买入时机'), h('div', null, b.timing.text)) : null,
+        b.note ? h('p', { class: 'small muted', style: { marginTop: 0 } }, b.note) : null,
+        pickList(b.picks, f, '今天没有符合条件的，宁缺毋滥。没入选的原因：'),
+        b.picks.length && reasonList(f) ? h('details', { class: 'small muted', style: { marginTop: '10px' } },
+          h('summary', null, '其余的为什么没入选'), reasonList(f)) : null);
+    return [method, b.gauge ? gaugeCard(b.gauge) : null, picks, b.etfs ? etfIdeas(b.etfs) : null, b.avoid ? avoidCard(b.avoid) : null,
+      b.funds ? fundSection(b.funds) : null, b.ranking ? dcaRanking(b.ranking) : null, b.faq ? faqCard(b.faq) : null];
   }
 
-  function etfSection(e) {
-    var rows = e.ranking.map(function (x) {
-      return h('tr', { class: x.score ? 'hl' : '' },
-        h('td', null, h('a', { href: '#/a/' + encodeURIComponent(x.key) + '?kind=etf' }, x.name), h('span', { class: 'small muted' }, ' ' + x.code)),
-        h('td', null, x.group), h('td', { class: 'n ' + F.cls(x.r60) }, F.pp(x.r60, 1)), h('td', { class: 'n ' + F.cls(x.excess) }, F.pp(x.excess, 1)),
-        h('td', { class: 'n' }, x.r2 === null ? '—' : F.num(x.r2)), h('td', null, x.score ? '入选' : x.why_not));
-    });
-    return card('ETF（同样的量法）', e.note,
-      h('details', { class: 'small t2' }, h('summary', null, '和股票有什么不同'), h('ul', null, e.how.map(function (x) { return h('li', null, x); }))),
-      checkupBox(e.checkup),
-      e.picks.length ? e.picks.map(function (x, i) { return pickCard(x, i + 1); }) : null,
-      e.safe ? h('p', { class: 'small' }, '空出来的仓位可以先放：', h('a', { href: '#/a/' + encodeURIComponent(e.safe.key) + '?kind=etf' }, e.safe.name + '（' + e.safe.code + '）')) : null,
-      rows.length ? h('div', { class: 'table-wrap', style: { marginTop: '12px' } }, h('table', { class: 'tbl' },
-        h('thead', null, h('tr', null, ['ETF', '类别', '近60日', '比沪深300', '走势拟合度', '结论'].map(function (x, i) {
-          return h('th', { class: i >= 2 && i <= 4 ? 'n' : '' }, x);
-        }))), h('tbody', null, rows))) : null);
+  // 大盘预估：先判断大盘，再看风格和板块
+  function gaugeCard(g) {
+    var fct = g.facts;
+    var on = g.parts.filter(function (x) { return x.on; });
+    var chips = on.length ? on.map(function (x) {
+      return h('span', { class: 'badge ' + (x.points > 0 ? 'pt-plus' : 'pt-minus'), title: x.rule }, x.label + ' ' + scoreText(x.points));
+    }) : h('span', { class: 'small muted' }, '今天没有一项触发');
+    var table = h('div', { class: 'table-wrap' }, h('table', { class: 'tbl' },
+      h('thead', null,
+        h('tr', { class: 'th-group' }, h('th', null, ''), h('th', { class: 'n', colspan: '3' }, '近十年（2016–2026）'), h('th', { class: 'n', colspan: '2' }, '更早的十年（2005–2016）')),
+        h('tr', null, h('th', null, '分数'), ['这样的日子占', '之后 5 天平均', '上涨的日子', '之后 5 天平均', '上涨的日子'].map(function (x) { return h('th', { class: 'n' }, x); }))),
+      h('tbody', null, g.table.map(function (r) {
+        return h('tr', { class: r.current ? 'hl' : '' }, h('td', null, r.bucket + (r.current ? '（今天）' : '')),
+          h('td', { class: 'n' }, Math.round(r['new'].share * 100) + '%'),
+          h('td', { class: 'n ' + F.cls(r['new'].after) }, F.pct(r['new'].after, 2)), h('td', { class: 'n' }, Math.round(r['new'].up * 100) + '%'),
+          h('td', { class: 'n ' + F.cls(r.old.after) }, F.pct(r.old.after, 2)), h('td', { class: 'n' }, Math.round(r.old.up * 100) + '%'));
+      }))));
+    var rc = g.recent || {};
+    var recent = rc.days ? h('details', { class: 'small t2' },
+      h('summary', null, '用最近两年多的行情再核对一遍（' + rc.from + ' 至 ' + rc.to + '）'),
+      h('div', { class: 'table-wrap' }, h('table', { class: 'tbl' },
+        h('thead', null, h('tr', null, h('th', null, '分数'), ['天数', '之后 5 天平均', '上涨的日子'].map(function (x) { return h('th', { class: 'n' }, x); }))),
+        h('tbody', null, rc.rows.map(function (r) {
+          return h('tr', null, h('td', null, r.bucket), h('td', { class: 'n' }, String(r.days)),
+            h('td', { class: 'n ' + F.cls(r.after) }, r.after === null ? '—' : F.pct(r.after, 2)), h('td', { class: 'n' }, r.up === null ? '—' : Math.round(r.up * 100) + '%'));
+        })))),
+      rc.signals && rc.signals.length ? h('p', { class: 'muted', style: { margin: '6px 0 0' } }, '最近几次分数到 2 以上的日子，之后 5 天全市场平均：' +
+        rc.signals.map(function (x) { return x.date.slice(5) + '（' + scoreText(x.score) + ' 分）' + F.pct(x.after, 1); }).join('、')) : null) : null;
+    var st = g.style;
+    return card('第一步：大盘预估', '收盘后给市场打分，分数够了才出手',
+      h('div', { class: 'stance ' + (STANCE_CLS[g.stance] || '') },
+        h('div', { class: 'gauge-score' }, h('span', { class: 'gs-num' }, scoreText(g.score)), h('span', { class: 'gs-label' }, g.label)),
+        h('div', null, g.basis)),
+      h('div', { class: 'sector-row' }, h('span', { class: 'small muted' }, '今天的加减分'), chips),
+      h('div', { class: 'small muted', style: { marginTop: '6px' } }, '今天：全市场 ' + fct.pool + ' 只活跃股票平均 ' + F.pct(fct.change, 1) + '，' + fct.limit_up + ' 只涨停、' + fct.limit_down + ' 只跌停，' +
+        (fct.amount_ratio ? '成交额是近 20 日均值的 ' + fct.amount_ratio.toFixed(2) + ' 倍' : '成交额对比不出来') + '；近 5 天平均 ' + F.pct(fct.change5, 1) + '；明天是' + fct.next_weekday + '。'),
+      h('details', { class: 'small t2', style: { marginTop: '8px' } }, h('summary', null, '全部打分项和今天的读数'),
+        h('ul', { class: 'marks' }, g.parts.map(function (x) {
+          return h('li', { class: x.on ? '' : 'muted' }, (x.on ? '✓ ' : '· ') + x.label + '（' + scoreText(x.points) + ' 分）：' + x.detail + '。' + x.rule);
+        }))),
+      h('h3', { class: 'sub-h' }, '这个分数在历史上意味着什么'),
+      h('p', { class: 'small muted', style: { margin: '0 0 6px' } }, '那天收盘后在全市场随便买、第二天开盘买入、拿 5 个交易日、扣掉手续费的平均收益。两个十年分开看：方法是看着近十年定的，更早的十年没用过。'),
+      table, recent,
+      st ? h('div', { class: 'step-box' }, h('strong', null, '第二步 风格：' + st.label), h('div', { class: 'small' }, st.notes.join('；') + '。' + st.advice + '。'),
+        h('div', { class: 'small muted' }, st.evidence)) : null,
+      h('div', { class: 'step-box' }, h('strong', null, '第三步 板块：' + (g.hot_sectors.length ? '今天不碰 ' + g.hot_sectors.map(function (x) { return x.name; }).join('、') : '今天没有涨停特别集中的板块')),
+        g.hot_sectors.length ? h('div', { class: 'small' }, g.hot_sectors.map(function (x) { return x.name + '：' + x.total + ' 只里 ' + x.limit_up + ' 只涨停'; }).join('；') + '。') : null,
+        h('div', { class: 'small muted' }, '当天涨停最集中的板块，之后 20 天平均比其他板块少赚 0.7%；按板块近期涨幅去追，没有优势。所以板块这一步只做回避。')));
+  }
+
+  function etfIdeas(e) {
+    return card('也可以直接买宽基 ETF', e.note,
+      h('p', { class: 'small muted', style: { marginTop: 0 } }, e.how),
+      e.picks.map(function (x) {
+        var href = '#/a/' + encodeURIComponent(x.key) + '?kind=etf';
+        return h('article', { class: 'pick' },
+          h('header', { class: 'pick-head' }, h('div', null, h('a', { class: 'pick-name', href: href }, x.name), h('span', { class: 'small muted' }, ' ' + x.code)),
+            h('span', { class: 'spacer' }), x.price ? h('span', { class: 'pick-price' }, F.num(x.price, 3)) : null),
+          h('div', { class: 'small' }, x.why),
+          h('ul', { class: 'plan-rules small' }, x.rules.map(function (r) { return h('li', null, r); }),
+            x.stop_price ? h('li', null, '按今天收盘价估，止损价约 ' + F.num(x.stop_price, 3)) : null));
+      }));
+  }
+
+  function avoidCard(a) {
+    return card('今天最热的（别追）', '冷热分最低的一批',
+      h('p', { class: 'small', style: { marginTop: 0 } }, a.note),
+      h('div', { class: 'table-wrap' }, h('table', { class: 'tbl' },
+        h('thead', null, h('tr', null, h('th', null, '股票'), h('th', null, '行业'), ['近 20 天', '盘中 60 天累计', '成交是一年平均的'].map(function (x) { return h('th', { class: 'n' }, x); }))),
+        h('tbody', null, a.names.map(function (x) {
+          return h('tr', null, h('td', null, h('a', { href: '#/a/' + encodeURIComponent(x.key) }, x.name), h('span', { class: 'small muted' }, ' ' + x.code)),
+            h('td', null, x.industry || '—'), h('td', { class: 'n ' + F.cls(x.r20) }, F.pct(x.r20, 0)),
+            h('td', { class: 'n ' + F.cls(x.id60) }, F.pct(x.id60, 0)), h('td', { class: 'n' }, x.vabn.toFixed(1) + ' 倍'));
+        })))));
+  }
+
+  function faqCard(list) {
+    return card('常见的疑问', '每一条都是拿二十二年的行情检验过的',
+      list.map(function (x) { return h('details', { class: 'faq' }, h('summary', null, x.q), h('p', { class: 'small' }, x.a)); }));
   }
 
   function fundSection(fs) {

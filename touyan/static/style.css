@@ -401,6 +401,7 @@ a.badge:hover { color: var(--text); }
 .plan-rules { margin: 0; padding-left: 18px; display: grid; gap: 2px; color: var(--text-2); }
 .plan-stats.wide { grid-template-columns: repeat(auto-fit, minmax(128px, 1fr)); }
 .board-tabs { margin: 4px 0 16px; flex-wrap: wrap; }
+.board-box { margin-bottom: 16px; }
 .board-tabs button { padding: 0 14px; height: 38px; font-size: 14px; }
 .checkup { border-radius: 10px; padding: 10px 12px; display: grid; gap: 8px; margin-top: 12px; background: var(--surface-2); border-left: 4px solid var(--border-strong); font-size: 14px; }
 .checkup.lvl-ok { border-left-color: var(--good); }
@@ -412,6 +413,26 @@ a.badge:hover { color: var(--text); }
 .fund-group h3 { margin: 0 0 4px; font-size: 15px; }
 .fund-pick { border-top: 1px solid var(--grid); padding: 10px 0; display: grid; gap: 8px; }
 .tbl tr.hl td { background: var(--accent-soft); }
+.regime.st-go strong, .stance.st-go strong, .st-go .gs-num { color: var(--good); }
+.regime.st-light strong, .stance.st-light strong, .st-light .gs-num { color: var(--accent); }
+.regime.st-avoid strong, .stance.st-avoid strong, .st-avoid .gs-num { color: var(--serious); }
+.stance { border-radius: 10px; padding: 12px 14px; display: grid; gap: 6px; background: var(--surface-2); border-left: 4px solid var(--border-strong); font-size: 14px; margin-bottom: 12px; }
+.stance.st-go { border-left-color: var(--good); }
+.stance.st-light { border-left-color: var(--accent); }
+.stance.st-avoid { border-left-color: var(--serious); }
+.gauge-score { display: flex; align-items: baseline; gap: 10px; }
+.gs-num { font-size: 34px; font-weight: 750; line-height: 1; font-variant-numeric: tabular-nums; }
+.gs-label { font-size: 18px; font-weight: 700; }
+.badge.pt-plus { background: color-mix(in srgb, var(--good) 16%, transparent); color: var(--good); }
+.badge.pt-minus { background: var(--warn-bg); color: var(--warn-ink); }
+.sub-h { margin: 16px 0 4px; font-size: 15px; }
+.marks { list-style: none; padding-left: 6px; margin: 6px 0 0; display: grid; gap: 2px; }
+.tbl .th-group th { border-bottom: 0; padding-bottom: 0; font-weight: 600; }
+.step-box { margin-top: 12px; padding: 10px 12px; border-radius: 10px; background: var(--surface-2); display: grid; gap: 4px; font-size: 14px; }
+.faq { border-top: 1px solid var(--grid); padding: 8px 0; }
+.faq:first-of-type { border-top: 0; }
+.faq summary { cursor: pointer; font-weight: 600; }
+.faq p { margin: 6px 0 0; color: var(--text-2); }
 @media (max-width: 640px) {
   .pick { padding: 12px; }
   .pick-levels { grid-template-columns: repeat(3, minmax(0, 1fr)); }

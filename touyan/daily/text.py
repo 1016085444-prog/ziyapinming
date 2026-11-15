@@ -14,15 +14,14 @@ def _pct(x, digits: int = 1, frac: bool = True) -> str:
 
 def checkup_text(c: dict) -> list[str]:
     out = [f"**方法体检**：{c.get('verdict', '')}"]
-    if c.get("n"):
-        line = (f"过去{c.get('span', '')}在 {c.get('stocks', 0)} 只里出现 {c['n']} 次：赚钱的占 {c['win_rate'] * 100:.0f}%，"
-                f"平均 {_pct(c['mean'])}，中位 {_pct(c['median'])}，平均拿 {c['avg_days']:.0f} 个交易日")
-        if c.get("baseline") is not None:
-            line += f"；同一批随便买、拿同样久，平均 {_pct(c['baseline'])}"
-        out.append(line + "。")
-        now = c.get("now")
-        if now:
-            out.append(f"目前「{c['regime']}」的市场环境下 {now['n']} 次：赚钱的占 {now['win_rate'] * 100:.0f}%，中位 {_pct(now['median'])}。")
+    out += [f"- {line}" for line in c.get("more") or []]
+    r = c.get("recent") or {}
+    if r.get("n"):
+        line = (f"**最近的实际表现**：按同样的规则回看，{r['days']} 个日子共 {r['n']} 笔，{r['win_rate'] * 100:.0f}% 赚钱，"
+                f"平均每笔 {_pct(r['mean'])}")
+        if r.get("baseline") is not None:
+            line += f"；同样的日子随便买是 {_pct(r['baseline'])}"
+        out += ["", line + "。样本少，只能看个大概。"]
     return out
 
 
@@ -35,29 +34,59 @@ def pick_text(i: int, p: dict) -> list[str]:
             "**预期收益**：" + ("（这个方法没通过历史检验，下面的数字仅供参考）" if plan["expected"].get("reliable") is False else "")
             + plan["expected"].get("text", ""), "**什么时候卖**："]
     out += [f"- {r}" for r in plan["rules"]]
+    if plan.get("stop_note"):
+        out.append(f"**关于止损**：{plan['stop_note']}")
     if p.get("risks"):
         out.append("**风险**：" + "；".join(p["risks"]))
     return out
 
 
+def gauge_text(g: dict) -> list[str]:
+    f = g["facts"]
+    on = [p for p in g["parts"] if p["on"]]
+    out = ["", f"### 大盘预估分：{g['score']:+d} · {g['label']}", g["basis"], "",
+           f"- 今天：全市场平均 {_pct(f['change'])}，{f['limit_up']} 只涨停、{f['limit_down']} 只跌停，"
+           + (f"成交额是近 20 日均值的 {f['amount_ratio']:.2f} 倍" if f.get("amount_ratio") else "成交额对比不出来")
+           + f"；明天是{f['next_weekday']}"]
+    out.append("- 加减分：" + ("、".join(f"{p['label']} {p['points']:+d}（{p['detail']}）" for p in on) if on else "没有一项触发"))
+    st = g.get("style")
+    if st:
+        out.append(f"- 风格：**{st['label']}**——{'；'.join(st['notes'])}。{st['advice']}")
+    if g.get("hot_sectors"):
+        out.append("- 今天涨停最集中的板块（不碰）：" + "、".join(f"{h['name']}（{h['limit_up']}/{h['total']}）" for h in g["hot_sectors"]))
+    out += ["", "| 分数 | 近十年：天数占比 | 之后 5 天平均 | 上涨的日子 | 更早的十年：之后 5 天平均 | 上涨的日子 |", "|---|---:|---:|---:|---:|---:|"]
+    for r in g["table"]:
+        mark = " ← 今天" if r["current"] else ""
+        out.append(f"| {r['bucket']}{mark} | {r['new']['share'] * 100:.0f}% | {_pct(r['new']['after'], 2)} | {r['new']['up'] * 100:.0f}% | "
+                   f"{_pct(r['old']['after'], 2)} | {r['old']['up'] * 100:.0f}% |")
+    return out
+
+
 def board_text(b: dict) -> list[str]:
-    out = ["", f"## {b['title']} · {b['name']}（{b['horizon']}）", b["idea"], ""] + checkup_text(b["checkup"])
+    out = ["", f"## {b['title']} · {b['name']}（{b['horizon']}）", b["idea"]]
+    if b.get("gauge"):
+        out += gauge_text(b["gauge"])
+    if b.get("timing"):
+        out += ["", f"**买入时机**：{b['timing']['text']}"]
+    out += [""] + checkup_text(b["checkup"])
     f = b.get("funnel") or {}
-    if not b["picks"]:
+    if b.get("note"):
+        out += ["", b["note"]]
+    elif not b["picks"]:
         reasons = "；".join(f"{k} {v} 只" for k, v in list((f.get("reasons") or {}).items())[:4])
         out += ["", "今天没有符合条件的。" + (f"没入选的主要原因：{reasons}。" if reasons else "")]
     for i, p in enumerate(b["picks"], 1):
         out += pick_text(i, p)
     etfs = b.get("etfs")
-    if etfs:
-        out += ["", "### ETF（同样的量法）", etfs["note"] + "。"] + checkup_text(etfs["checkup"])
-        for i, p in enumerate(etfs["picks"], 1):
-            out += pick_text(i, p)
-        if etfs["ranking"]:
-            out += ["", "| ETF | 类别 | 近60日 | 比沪深300 | 拟合度 | 结论 |", "|---|---|---:|---:|---:|---|"]
-            for r in etfs["ranking"][:10]:
-                out.append(f"| {r['name']} | {r['group']} | {_pct(r['r60'], 1, False)} | {_pct(r['excess'], 1, False)} | "
-                           f"{r['r2'] if r['r2'] is not None else '—'} | {'入选' if r['score'] else r['why_not']} |")
+    if etfs and etfs.get("picks"):
+        out += ["", "### 也可以直接买宽基 ETF", etfs["how"]]
+        for e in etfs["picks"]:
+            out += ["", f"**{e['name']}（{e['code']}）**" + (f" · 最新 {e['price']}" if e.get("price") else ""), e["why"]]
+            out += [f"- {r}" for r in e["rules"]]
+    avoid = b.get("avoid")
+    if avoid and avoid.get("names"):
+        out += ["", "### 今天最热的（别追）", avoid["note"], "",
+                "、".join(f"{a['name']}（近 20 天 {_pct(a['r20'], 0)}）" for a in avoid["names"])]
     funds = b.get("funds")
     if funds:
         out += ["", "### 长期持有的基金"]
@@ -66,12 +95,12 @@ def board_text(b: dict) -> list[str]:
         for i, p in enumerate(funds["picks"], 1):
             out += pick_text(i, p)
     if b.get("ranking"):
-        if b.get("note"):
-            out += ["", b["note"]]
         out += ["", "| 指数 | 基金 | 温度 | 这个月 | 定投3年赚钱概率 | 中位收益 | 折合年化 | 较差的一成 |", "|---|---|---:|---|---:|---:|---:|---:|"]
         for r in b["ranking"]:
             out.append(f"| {r['index']} | {r['name']} | {r['temp'] if r['temp'] is not None else '—'} | {r['advice']} | "
                        f"{r['win_rate']:.0f}% | {_pct(r['median'], 0, False)} | {_pct(r['irr'], 1, False)} | {_pct(r['p10'], 0, False)} |")
+    for q in b.get("faq") or []:
+        out += ["", f"**问：{q['q']}**", q["a"]]
     return out
 
 
@@ -82,7 +111,10 @@ def to_markdown(p: dict) -> str:
     m = p["market"]
     out = [f"# 每日精选 · {p['as_of']}{label}", "", f"> {p['disclaimer']}", ""]
     reg = m["regime"]
-    out += ["## 大盘", f"- 市场温度：**{reg['label']}**（{'；'.join(reg['notes'])}）。{reg['advice']}"]
+    out += ["## 大盘", f"- 走势：**{reg['label']}**（{'；'.join(reg['notes'])}）"]
+    g = p.get("gauge")
+    if g:
+        out.append(f"- 大盘预估分：**{g['score']:+d} · {g['label']}**。{g['basis']}")
     if m["indices"]:
         out.append("- " + " | ".join(f"{i['name']} {i['price']:.2f}（{_pct(i['change_pct'], 2, False)}）"
                                      for i in m["indices"] if i.get("price") is not None))

@@ -239,6 +239,92 @@ def industry_boards(cache, max_age: float = 1800) -> list[dict]:
     return boards
 
 
+# ── 全市场财报摘要：每只股票最新一期的净利润同比和所属行业 ──────────────
+# 东方财富数据中心的「业绩报表」，一个报告期一张全市场的表。每日精选的中期板块要给几千只股票
+# 确认「利润是不是在增长」，逐只去读财报太慢，用这张表十几次请求就够。
+
+REPORT_URLS = ("https://datacenter.eastmoney.com/api/data/v1/get", "https://datacenter-web.eastmoney.com/api/data/v1/get")
+REPORT_COLUMNS = "SECURITY_CODE,NOTICE_DATE,PARENT_NETPROFIT,SJLTZ,BASIC_EPS,PUBLISHNAME"
+REPORT_LABELS = {"03-31": "一季报", "06-30": "中报", "09-30": "三季报", "12-31": "年报"}
+
+
+def recent_periods(today: date, n: int = 3) -> list[str]:
+    """today 之前最近的 n 个报告期（季度末），新的在前。年报、一季报披露期里有的公司最新一期还是上一期，所以取三个。"""
+    out, y = [], today.year
+    while len(out) < n:
+        for md in ("12-31", "09-30", "06-30", "03-31"):
+            p = f"{y}-{md}"
+            if p < today.isoformat() and len(out) < n:
+                out.append(p)
+        y -= 1
+    return out
+
+
+def parse_reports(payload: dict) -> tuple[dict[str, dict], int]:
+    result = (payload or {}).get("result") if isinstance(payload, dict) else None
+    if not result:
+        return {}, 0                                 # 这个报告期还没有公司披露
+    rows = {}
+    for d in result.get("data") or []:
+        code = str(d.get("SECURITY_CODE") or "")
+        if not re.fullmatch(r"\d{6}", code):
+            continue
+        rows[code] = {"notice": str(d.get("NOTICE_DATE") or "")[:10], "profit": num(d.get("PARENT_NETPROFIT")),
+                      "yoy": num(d.get("SJLTZ")), "eps": num(d.get("BASIC_EPS")),
+                      "industry": str(d.get("PUBLISHNAME") or "").strip()}
+    return rows, int(result.get("pages") or 1)
+
+
+def report_period(period: str) -> dict[str, dict]:
+    """一个报告期的全市场业绩报表：{代码: {公告日, 归母净利润, 净利润同比(%), 每股收益, 行业}}。"""
+    last: Exception | None = None
+    for url in REPORT_URLS:
+        rows: dict[str, dict] = {}
+        try:
+            for page in range(1, MAX_PAGES + 1):
+                _paced("em-datacenter", 0.35)
+                payload = net.get_json(url, params={
+                    "reportName": "RPT_LICO_FN_CPD", "columns": REPORT_COLUMNS, "sortColumns": "SECURITY_CODE", "sortTypes": "1",
+                    "pageSize": "500", "pageNumber": str(page),
+                    "filter": f"(REPORTDATE='{period}')(SECURITY_TYPE_CODE in (\"058001001\"))",
+                }, headers={"User-Agent": UA, "Referer": "https://data.eastmoney.com/"}, timeout=30)
+                batch, pages = parse_reports(payload)
+                rows.update(batch)
+                if not batch or page >= pages:
+                    break
+            return rows
+        except SourceError as exc:
+            last = exc
+    raise SourceError(f"全市场财报摘要取不到：{last}")
+
+
+def latest_reports(cache, today: date) -> dict[str, dict]:
+    """每只股票已经披露的最新一期：{代码: {period, label, yoy(小数), profit, eps, industry, notice}}。
+    行业取自任意一期（它不随报告期变）。已经过完披露期的报告期存 7 天，最新的一期每 20 小时更新。"""
+    out: dict[str, dict] = {}
+    industry: dict[str, str] = {}
+    cutoff = today.isoformat()
+    for i, period in enumerate(recent_periods(today)):
+        key = f"reports:{period}"
+        rows = cache.get(key, 20 * 3600 if i == 0 else 7 * 86400)
+        if rows is None:
+            rows = report_period(period)
+            if rows:
+                cache.set(key, rows)
+        for code, r in rows.items():
+            if r.get("industry"):
+                industry.setdefault(code, r["industry"])
+            if code in out or not r.get("notice") or r["notice"] > cutoff:
+                continue
+            out[code] = {"period": period, "label": f"{period[:4]}年{REPORT_LABELS[period[5:]]}", "notice": r["notice"],
+                         "yoy": r["yoy"] / 100 if r.get("yoy") is not None else None, "profit": r.get("profit"), "eps": r.get("eps")}
+    for code, r in out.items():
+        r["industry"] = industry.get(code, "")
+    for code, name in industry.items():              # 还没披露过任何一期的（刚上市），至少有行业
+        out.setdefault(code, {"period": "", "label": "", "notice": "", "yoy": None, "profit": None, "eps": None, "industry": name})
+    return out
+
+
 # ── 开放式基金排行（天天基金） ────────────────────────────────────
 
 FUND_RANK_URL = "https://fund.eastmoney.com/data/rankhandler.aspx"

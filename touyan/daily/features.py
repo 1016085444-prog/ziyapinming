@@ -1,0 +1,147 @@
+"""从日线里量出来的几样东西，以及「冷热分」。
+
+冷热分量的是一只股票被追捧的程度。四样，全部来自日线，都是越高越「热」：
+- 盘中拉升：近 60 个交易日「开盘到收盘」的累计涨幅。散户多在盘中追涨，盘中一路被买上去的股票，之后明显跑输；
+- 放量：近 20 日成交股数 ÷ 近 250 日成交股数。突然热闹起来的股票，之后跑输；
+- 量价同向：近 20 日里收盘价和成交股数的相关系数。越涨越放量是有人在追，之后跑输；
+- 收在高位：近 20 日平均每天收在当天最低到最高之间的什么位置。天天尾盘被买上去的，之后跑输。
+四样各自在全池里排名次，取平均，再排一次名次：100 = 最冷（最没人追），0 = 最热。
+
+依据见 research/：最热的一成在 2005–2026 这 22 年里每一年都跑输同期随便买（60 天平均少赚 2%–3%）；
+最冷的一成在两个十年里都跑赢。成交股数用「成交额 ÷ 复权价」来算，不受送转股和限售股解禁的影响。
+"""
+
+from __future__ import annotations
+
+from array import array
+from collections import deque
+from math import log, sqrt
+
+from .common import pct_rank
+from .pool import Stock
+
+MIN_T = 250                # 至少要有这么多根之前的日线
+FIELDS = ("id60", "vabn", "pvv", "clv", "r1", "r5", "r20", "hi")
+COLD_FIELDS = ("id60", "vabn", "pvv", "clv")
+
+
+class Prep:
+    """一只股票的前缀和：回看任意一天的指标都是 O(1)。只在算指标的时候建，用完就丢。"""
+
+    __slots__ = ("s", "lin", "v1", "v2", "c1", "c2", "cv", "clv", "hi")
+
+    def __init__(self, s: Stock, hi_window: int = 250):
+        self.s = s
+        n, c, o, h, l, a = s.n, s.c, s.o, s.h, s.l, s.a
+        total = sum(a[i] / c[i] for i in range(n) if c[i] > 0)
+        scale = total / n if total > 0 else 1.0           # 成交股数除以均值，免得平方后数字太大
+        lin, v1, v2, c1, c2, cv, clv = [0.0], [0.0], [0.0], [0.0], [0.0], [0.0], [0.0]
+        for i in range(n):
+            ci = c[i]
+            v = a[i] / ci / scale if ci > 0 else 0.0
+            lin.append(lin[-1] + (log(ci / o[i]) if ci > 0 and o[i] > 0 else 0.0))
+            v1.append(v1[-1] + v)
+            v2.append(v2[-1] + v * v)
+            c1.append(c1[-1] + ci)
+            c2.append(c2[-1] + ci * ci)
+            cv.append(cv[-1] + ci * v)
+            span = h[i] - l[i]
+            clv.append(clv[-1] + ((ci - l[i]) / span if span > 0 else 0.5))
+        self.lin, self.v1, self.v2, self.c1, self.c2, self.cv, self.clv = lin, v1, v2, c1, c2, cv, clv
+        hi, window = [0.0] * n, deque()                    # 近 hi_window 根的最高价
+        for i in range(n):
+            while window and h[window[-1]] <= h[i]:
+                window.pop()
+            window.append(i)
+            if window[0] <= i - hi_window:
+                window.popleft()
+            hi[i] = h[window[0]]
+        self.hi = hi
+
+    def id60(self, t: int, k: int = 60) -> float:
+        return self.lin[t + 1] - self.lin[t + 1 - k]
+
+    def vabn(self, t: int, short: int = 20, long: int = 250) -> float:
+        base = (self.v1[t + 1] - self.v1[t + 1 - long]) / long
+        return (self.v1[t + 1] - self.v1[t + 1 - short]) / short / base if base > 0 else 1.0
+
+    def pvv(self, t: int, k: int = 20) -> float:
+        a = t + 1 - k
+        sx, sy = self.c1[t + 1] - self.c1[a], self.v1[t + 1] - self.v1[a]
+        vx = self.c2[t + 1] - self.c2[a] - sx * sx / k
+        vy = self.v2[t + 1] - self.v2[a] - sy * sy / k
+        if vx <= 1e-12 or vy <= 1e-12:
+            return 0.0
+        return max(-1.0, min(1.0, (self.cv[t + 1] - self.cv[a] - sx * sy / k) / sqrt(vx * vy)))
+
+    def clv20(self, t: int, k: int = 20) -> float:
+        return (self.clv[t + 1] - self.clv[t + 1 - k]) / k
+
+    def values(self, t: int) -> tuple[float, ...]:
+        """按 FIELDS 的顺序。"""
+        c = self.s.c
+        return (self.id60(t), self.vabn(t), self.pvv(t), self.clv20(t), c[t] / c[t - 1] - 1, c[t] / c[t - 5] - 1,
+                c[t] / c[t - 20] - 1, c[t] / self.hi[t] - 1 if self.hi[t] > 0 else 0.0)
+
+
+class Cross:
+    """某一天全池的横截面：每只股票的指标，以及排出来的冷热分。"""
+
+    def __init__(self, day: int):
+        self.day = day
+        self.codes: list[str] = []
+        self.t = array("i")                     # 这一天是各自的第几根
+        self.col = {f: array("f") for f in FIELDS}
+        self.cold: list[float] = []             # 0–100，越大越冷
+        self.pos: dict[str, int] = {}
+
+    def add(self, code: str, t: int, values: tuple[float, ...]) -> None:
+        self.pos[code] = len(self.codes)
+        self.codes.append(code)
+        self.t.append(t)
+        for f, v in zip(FIELDS, values):
+            self.col[f].append(v)
+
+    def rank(self) -> "Cross":
+        if not self.codes:
+            return self
+        n = len(self.codes)
+        ranks = [pct_rank(list(self.col[f]), higher_better=False) for f in COLD_FIELDS]
+        self.cold = pct_rank([sum(r[i] for r in ranks) / len(ranks) for i in range(n)])
+        return self
+
+    def get(self, code: str) -> dict | None:
+        i = self.pos.get(code)
+        if i is None:
+            return None
+        out = {f: self.col[f][i] for f in FIELDS}
+        out["t"] = self.t[i]
+        out["cold"] = self.cold[i] if self.cold else None
+        return out
+
+    def __len__(self) -> int:
+        return len(self.codes)
+
+
+def crosses(stocks: dict[str, Stock], days: list[int]) -> dict[int, Cross]:
+    """这些天各自的横截面。每只股票只建一次前缀和。当天没交易、之前的日线不够的不算在内。"""
+    out = {d: Cross(d) for d in days}
+    for code, s in stocks.items():
+        hits = [(d, s.index(d)) for d in days]
+        hits = [(d, t) for d, t in hits if t >= MIN_T]
+        if not hits:
+            continue
+        prep = Prep(s)
+        for d, t in hits:
+            out[d].add(code, t, prep.values(t))
+    for cross in out.values():
+        cross.rank()
+    return out
+
+
+def oversold_score(cross: Cross) -> list[float]:
+    """短期板块的排序分（0–100）：近 5 日跌得多、近 20 日跌得多、离一年高点远、没人追捧，四项名次的平均。"""
+    r5 = pct_rank(list(cross.col["r5"]), higher_better=False)
+    r20 = pct_rank(list(cross.col["r20"]), higher_better=False)
+    hi = pct_rank(list(cross.col["hi"]), higher_better=False)
+    return [(r5[i] + r20[i] + hi[i] + cross.cold[i]) / 4 for i in range(len(cross))]
