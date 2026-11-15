@@ -114,7 +114,7 @@ def build_pick(s: Stock, c: dict, stance: str, as_of: str) -> dict:
     risks = ["如果买入后出了利空公告（业绩暴雷、被立案等），不等止损价，直接卖",
              "历史上最差的情况：2015 年那种连环暴跌里，一篮子 5 只在 5 天里亏过 20% 以上——所以单只不超过一成仓位"]
     if stance == "light":
-        risks.insert(0, "今天只有 2 分（轻仓档）：历史上这一档每笔平均只有 +1.7%，仓位减半")
+        risks.insert(0, f"今天是轻仓档：历史上这一档每笔平均只有 {ev.pct(ev.SHORT['light']['new']['mean'])}，仓位减半")
     return {
         "key": s.key, "code": s.code, "name": c["name"], "kind": "stock", "industry": c["industry"],
         "price": price(close), "as_of": as_of, "score": round(c["score"], 1),
@@ -200,20 +200,26 @@ def checkup(recent: dict) -> dict:
     new, old = ev.SHORT["go"]["new"], ev.SHORT["go"]["old"]
     every = ev.SHORT["everyday"]["new"]
     bad = ev.SHORT["bad_days"]["new"]
+    cold, warm = ev.SHORT["by_temp"]["lt40"], ev.SHORT["by_temp"]["ge60"]
     return {
         "level": "ok", "n": new["n"], "win_rate": new["win"], "mean": new["mean"], "median": new["median"],
         "baseline": new["base"], "avg_days": new["days"], "span": "十年", "stocks": ev.NEW["pool"],
         "verdict": (f"通过了两个十年的检验。{ev.NEW['label']}：分数 ≥3 的日子按规则买入共 {new['n']} 笔，{new['win'] * 100:.0f}% 赚钱，"
                     f"平均每笔 {ev.pct(new['mean'])}（同样的日子随便买是 {ev.pct(new['base'])}）；"
-                    f"{ev.OLD['label']}：{old['n']} 笔，{old['win'] * 100:.0f}% 赚钱，平均 {ev.pct(old['mean'])}，12 年里没有一年是亏的。"),
+                    f"{ev.OLD['label']}：{old['n']} 笔，{old['win'] * 100:.0f}% 赚钱，平均 {ev.pct(old['mean'])}，12 年里只有 {ev.years(old['bad_years'])}是亏的。"),
         "more": [
             f"对照一：同样的选股规则每天都用，{every['n']} 笔里只有 {every['win'] * 100:.0f}% 赚钱，平均 {ev.pct(every['mean'], 2)}——等于没用。",
             f"对照二：专挑分数 ≤−1 的日子用，{bad['win'] * 100:.0f}% 赚钱，平均 {ev.pct(bad['mean'], 2)}。所以分数不够的日子不出手。",
-            "分年度（近十年，分数 ≥3）：" + "、".join(f"{y} {ev.pct(v)}" for y, v in ev.SHORT["by_year_new"].items()) + "。",
+            f"市场温度：温度 40 以下时出手，平均 {ev.pct(cold['new']['mean'])} / {ev.pct(cold['old']['mean'])}；60 以上只有 {ev.pct(warm['new']['mean'])} / {ev.pct(warm['old']['mean'])}；"
+            f"80 以上是 {ev.pct(ev.SHORT['by_temp']['ge80']['old']['mean'])}。去掉温度 80 以上的日子后，两个十年里没有一年是亏的。",
+            f"亏钱的年份：{ev.years(new['bad_years'])}（{ev.NEW['short']}）、{ev.years(old['bad_years'])}（{ev.OLD['short']}）。",
             f"最差的情况：一篮子 5 只在 5 天里亏过 {-new['basket_worst'] * 100:.0f}%（近十年）/ {-old['basket_worst'] * 100:.0f}%（2015 年）。"
             "止损和单只一成仓位就是为这个准备的。",
+            ev.FACTS["short_hold"], ev.FACTS["short_entry"],
             "口径：信号收盘后才知道，第二天开盘买；开盘就涨停的买不进；当天买的当天不能卖；每笔扣 0.2%。",
         ],
+        "by_year": {"new": ev.SHORT["by_year"]["new"], "old": ev.SHORT["by_year"]["old"]},
+        "hist": ev.SHORT["hist"],
         "recent": recent,
     }
 
@@ -223,7 +229,7 @@ def select(stocks: dict[str, Stock], crosses: dict[int, Cross], g: dict, rows: d
     cross = crosses.get(day_int(as_of)) or Cross(day_int(as_of))
     hot = {h["name"] for h in g["hot_sectors"]}
     cands, reasons = candidates(stocks, cross, rows, industry, hot)
-    acting = g["score"] >= gg.LIGHT
+    acting = g["stance"] in ("go", "light")
     picked = diversify(cands, n) if acting else []
     recent = recent_check(stocks, crosses, g.get("history") or [], rows, n)
     board = {

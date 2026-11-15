@@ -30,7 +30,7 @@ POOL_DAYS = 640            # 约两年半；腾讯证券一次请求最多 640 �
 MIN_BARS = 260             # 上市满一年（冷热分要回看 250 个交易日）
 MIN_AMOUNT = 5e7           # 近 20 个交易日的日均成交额
 MAX_POOL = 4500            # 防御：快照异常时不至于去下载整个市场
-MAGIC = b"TYPOOL1\n"
+MAGIC = b"TYPOOL2\n"            # 2：每只股票多存了近两年的分红
 
 
 def day_int(text: str) -> int:
@@ -60,24 +60,32 @@ def build_pool(rows: list[dict]) -> list[dict]:
 class Stock:
     """一只股票的日线（等比复权）。dates 是 20261113 这样的整数；a 是成交额（元）。"""
 
-    __slots__ = ("code", "market", "name", "dates", "o", "h", "l", "c", "a", "limit", "n", "float_mv")
+    __slots__ = ("code", "market", "name", "dates", "o", "h", "l", "c", "a", "limit", "n", "float_mv", "div12", "div_prev")
 
-    def __init__(self, code: str, market: str, name: str, dates, o, h, l, c, a, float_mv: float | None = None):
+    def __init__(self, code: str, market: str, name: str, dates, o, h, l, c, a, float_mv: float | None = None,
+                 div12: float | None = None, div_prev: float | None = None):
         self.code, self.market, self.name = code, market, name
         self.dates, self.o, self.h, self.l, self.c, self.a = dates, o, h, l, c, a
         self.n = len(dates)
         self.limit = limit_pct(code, market)
         self.float_mv = float_mv
+        self.div12, self.div_prev = div12, div_prev      # 近一年、再往前一年的每股现金分红（今天的股数口径）；None = 不知道
 
     @classmethod
-    def from_bars(cls, bars: list[Bar], code: str, market: str = "SH", name: str = "") -> "Stock":
+    def from_bars(cls, bars: list[Bar], code: str, market: str = "SH", name: str = "", extra: dict | None = None) -> "Stock":
         last = bars[-1] if bars else None
         mv = last.amount / (last.turnover / 100) if last and last.amount and last.turnover else None
+        extra = extra or {}
         return cls(code, market, name,
                    array("i", (day_int(b.date) for b in bars)),
                    array("f", (b.open for b in bars)), array("f", (b.high for b in bars)),
                    array("f", (b.low for b in bars)), array("f", (b.close for b in bars)),
-                   array("f", (b.amount or 0.0 for b in bars)), mv)
+                   array("f", (b.amount or 0.0 for b in bars)), mv, extra.get("div12"), extra.get("div_prev"))
+
+    @property
+    def dividend_yield(self) -> float | None:
+        """近一年现金分红 ÷ 最新收盘价；没有分红记录的返回 None。"""
+        return self.div12 / self.c[-1] if self.div12 is not None and self.n and self.c[-1] > 0 else None
 
     @property
     def key(self) -> str:
@@ -120,7 +128,7 @@ def clean(bars: list[Bar]) -> bool:
 def save_pool(path: Path | str | None, as_of: str, stocks: dict[str, Stock]) -> None:
     if path is None:
         return
-    head = {"as_of": as_of, "stocks": [[s.code, s.market, s.name, s.n, s.float_mv] for s in stocks.values()]}
+    head = {"as_of": as_of, "stocks": [[s.code, s.market, s.name, s.n, s.float_mv, s.div12, s.div_prev] for s in stocks.values()]}
     body = b"".join(col.tobytes() for s in stocks.values() for col in (s.dates, s.o, s.h, s.l, s.c, s.a))
     blob = MAGIC + zlib.compress(json.dumps(head, ensure_ascii=False).encode("utf-8") + b"\n" + body, 1)
     tmp = Path(str(path) + ".tmp")
@@ -140,7 +148,7 @@ def load_saved(path: Path | str | None, as_of: str) -> dict[str, Stock] | None:
         if head.get("as_of") != as_of:
             return None
         out, pos = {}, cut + 1
-        for code, market, name, n, mv in head["stocks"]:
+        for code, market, name, n, mv, div12, div_prev in head["stocks"]:
             cols = []
             for typecode in "ifffff":
                 col = array(typecode)
@@ -148,7 +156,7 @@ def load_saved(path: Path | str | None, as_of: str) -> dict[str, Stock] | None:
                 col.frombytes(raw[pos:pos + size])
                 pos += size
                 cols.append(col)
-            out[code] = Stock(code, market, name, *cols, float_mv=mv)
+            out[code] = Stock(code, market, name, *cols, float_mv=mv, div12=div12, div_prev=div_prev)
         return out
     except (OSError, ValueError, KeyError, zlib.error):
         return None
@@ -158,17 +166,18 @@ def load_saved(path: Path | str | None, as_of: str) -> dict[str, Stock] | None:
 
 def load_pool(fetch, rows: list[dict], as_of: str, partial: str | None = None, progress=None,
               path: Path | str | None = None, days: int = POOL_DAYS, workers: int = 8) -> tuple[dict[str, Stock], dict]:
-    """返回 ({代码: Stock}, 统计)。fetch(row, days) → 日线（等比复权）。
+    """返回 ({代码: Stock}, 统计)。fetch(row, days) → 日线（等比复权），或者 (日线, {"div12":…, "div_prev":…})。
     取不到、今天没交易（停牌）、上市不满一年、成交太冷清的都不进池子。"""
     saved = load_saved(path, as_of)
     if saved is not None and len(saved) >= len(rows) * 0.5:
         return saved, {"wanted": len(rows), "loaded": len(saved), "failed": 0, "stale": 0, "short": 0, "thin": 0, "cached": True}
 
     def one(r):
-        bars = fetch(r, days)
+        got = fetch(r, days)
+        bars, extra = got if isinstance(got, tuple) else (got, None)
         if partial and bars and bars[-1].date == partial:
             bars = bars[:-1]                                # 今天还没走完的那根不用
-        return bars
+        return bars, extra
 
     out: dict[str, Stock] = {}
     failed = stale = short = thin = 0
@@ -178,7 +187,7 @@ def load_pool(fetch, rows: list[dict], as_of: str, partial: str | None = None, p
             if progress and (i % 20 == 0 or i == len(futures)):
                 progress(i, len(futures))
             try:
-                bars = fut.result()
+                bars, extra = fut.result()
             except Exception:
                 failed += 1
                 continue
@@ -187,7 +196,7 @@ def load_pool(fetch, rows: list[dict], as_of: str, partial: str | None = None, p
             elif len(bars) < MIN_BARS or not clean(bars):
                 short += 1                                  # 上市不满一年，或者行情里有 0 这样的坏数据
             else:
-                s = Stock.from_bars(bars, r["code"], r["market"], r.get("name", ""))
+                s = Stock.from_bars(bars, r["code"], r["market"], r.get("name", ""), extra)
                 if s.avg_amount(s.n - 1) < MIN_AMOUNT:
                     thin += 1                               # 成交太冷清
                 else:

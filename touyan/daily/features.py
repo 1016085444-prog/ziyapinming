@@ -145,3 +145,104 @@ def oversold_score(cross: Cross) -> list[float]:
     r20 = pct_rank(list(cross.col["r20"]), higher_better=False)
     hi = pct_rank(list(cross.col["hi"]), higher_better=False)
     return [(r5[i] + r20[i] + hi[i] + cross.cold[i]) / 4 for i in range(len(cross))]
+
+
+# ── 长期板块用的几样慢指标 ──────────────────────────────────────────
+
+def volatility(s: Stock, k: int = 250) -> float | None:
+    """近 k 个交易日日涨跌幅的标准差（不够 150 根的不算）。"""
+    a = max(1, s.n - k)
+    rets = [s.c[i] / s.c[i - 1] - 1 for i in range(a, s.n) if s.c[i - 1] > 0]
+    if len(rets) < 150:
+        return None
+    m = sum(rets) / len(rets)
+    return sqrt(sum((r - m) ** 2 for r in rets) / (len(rets) - 1))
+
+
+def turnover(s: Stock, k: int = 250) -> float | None:
+    """近 k 个交易日平均每天换手多少（成交股数 ÷ 流通股数）。流通市值没取到的不算。"""
+    if not s.float_mv or s.n < 150 or s.c[-1] <= 0:
+        return None
+    a = max(0, s.n - k)
+    shares = sum(s.a[i] / s.c[i] for i in range(a, s.n) if s.c[i] > 0) / (s.n - a)
+    return shares * s.c[-1] / s.float_mv
+
+
+def long_return(s: Stock, k: int = 600, min_bars: int = 500) -> float | None:
+    """近 k 个交易日（约两年半）的涨幅；日线不够 min_bars 根的不算。"""
+    if s.n < min_bars:
+        return None
+    base = s.c[max(0, s.n - 1 - k)]
+    return s.c[-1] / base - 1 if base > 0 else None
+
+
+def heat(stocks: dict[str, Stock], cross: Cross) -> dict[str, dict]:
+    """「四种热」：一年波动最大的两成、换手最高的两成、被追捧（冷热分最低的两成）、两年半涨得最多的两成。
+    长期板块不选这些——它们之后一两年是跑输的。返回 {代码: {vol, turn, long, cold, 各自的名次, kinds: [属于哪几种热]}}。"""
+    codes = [c for i, c in enumerate(cross.codes) if cross.t[i] == stocks[c].n - 1]
+    vol = [volatility(stocks[c]) for c in codes]
+    turn = [turnover(stocks[c]) for c in codes]
+    lng = [long_return(stocks[c]) for c in codes]
+    rv, rt, rl = pct_rank(vol), pct_rank(turn), pct_rank(lng)
+    out = {}
+    for i, c in enumerate(codes):
+        cold = cross.cold[cross.pos[c]]
+        kinds = []
+        if vol[i] is not None and rv[i] >= 80:
+            kinds.append("波动大")
+        if turn[i] is not None and rt[i] >= 80:
+            kinds.append("换手高")
+        if cold < 20:
+            kinds.append("被追捧")
+        if lng[i] is not None and rl[i] >= 80:
+            kinds.append("两年半涨得多")
+        out[c] = {"vol": vol[i], "turn": turn[i], "long": lng[i], "cold": cold, "vol_rank": rv[i], "turn_rank": rt[i], "long_rank": rl[i], "kinds": kinds}
+    return out
+
+
+def industry_trends(stocks: dict[str, Stock], industry: dict[str, str], calendar: list[int], long: int = 600, short: int = 125,
+                    min_count: int = 8) -> dict[str, dict]:
+    """各行业的长期走势：行业里的股票等权，和全部行业的平均比，看近 long 天（约两年半）和近 short 天（半年）谁强谁弱。
+
+    - 长期走弱：两年半排在全部行业的后三成，最近半年也在后一半；
+    - 长期走强：两年半排在前三成，最近半年也在前一半。
+    检验下来（research/exp54–56）行业是强者恒强：长期走弱的行业之后一到三年继续落后，所以长期板块不从里面选。
+    返回 {行业: {state: weak/strong/neutral, long, short（相对全部行业平均的超额）, long_rank, short_rank, count}}。
+    """
+    days = calendar[-(long + 1):]
+    pos = {d: i for i, d in enumerate(days)}
+    m = len(days)
+    acc: dict[str, tuple[list[float], list[int]]] = {}
+    members: dict[str, int] = {}
+    for code, s in stocks.items():
+        name = industry.get(code)
+        if not name:
+            continue
+        members[name] = members.get(name, 0) + 1
+        sums, counts = acc.setdefault(name, ([0.0] * m, [0] * m))
+        for i in range(max(1, s.n - long), s.n):
+            j = pos.get(s.dates[i])
+            if j is not None and s.c[i - 1] > 0:
+                sums[j] += s.c[i] / s.c[i - 1] - 1
+                counts[j] += 1
+    names = [k for k in acc if members[k] >= min_count]
+    if len(names) < 10 or m < short + 20:
+        return {}
+    daily = {k: [acc[k][0][j] / acc[k][1][j] if acc[k][1][j] else 0.0 for j in range(m)] for k in names}
+    market = [sum(daily[k][j] for k in names) / len(names) for j in range(m)]
+
+    def excess(k: str, start: int) -> float:
+        a = b = 1.0
+        for j in range(start, m):
+            a *= 1 + daily[k][j]
+            b *= 1 + market[j]
+        return a / b - 1
+
+    lng = [excess(k, 1) for k in names]
+    sht = [excess(k, m - short) for k in names]
+    rl, rs = pct_rank(lng), pct_rank(sht)
+    out = {}
+    for i, k in enumerate(names):
+        state = "weak" if rl[i] < 30 and rs[i] < 50 else "strong" if rl[i] >= 70 and rs[i] >= 50 else "neutral"
+        out[k] = {"state": state, "long": lng[i], "short": sht[i], "long_rank": rl[i], "short_rank": rs[i], "count": members[k]}
+    return out

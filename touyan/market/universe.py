@@ -244,7 +244,7 @@ def industry_boards(cache, max_age: float = 1800) -> list[dict]:
 # 确认「利润是不是在增长」，逐只去读财报太慢，用这张表十几次请求就够。
 
 REPORT_URLS = ("https://datacenter.eastmoney.com/api/data/v1/get", "https://datacenter-web.eastmoney.com/api/data/v1/get")
-REPORT_COLUMNS = "SECURITY_CODE,NOTICE_DATE,PARENT_NETPROFIT,SJLTZ,BASIC_EPS,PUBLISHNAME"
+REPORT_COLUMNS = "SECURITY_CODE,NOTICE_DATE,PARENT_NETPROFIT,SJLTZ,BASIC_EPS,WEIGHTAVG_ROE,PUBLISHNAME"
 REPORT_LABELS = {"03-31": "一季报", "06-30": "中报", "09-30": "三季报", "12-31": "年报"}
 
 
@@ -270,13 +270,13 @@ def parse_reports(payload: dict) -> tuple[dict[str, dict], int]:
         if not re.fullmatch(r"\d{6}", code):
             continue
         rows[code] = {"notice": str(d.get("NOTICE_DATE") or "")[:10], "profit": num(d.get("PARENT_NETPROFIT")),
-                      "yoy": num(d.get("SJLTZ")), "eps": num(d.get("BASIC_EPS")),
+                      "yoy": num(d.get("SJLTZ")), "eps": num(d.get("BASIC_EPS")), "roe": num(d.get("WEIGHTAVG_ROE")),
                       "industry": str(d.get("PUBLISHNAME") or "").strip()}
     return rows, int(result.get("pages") or 1)
 
 
 def report_period(period: str) -> dict[str, dict]:
-    """一个报告期的全市场业绩报表：{代码: {公告日, 归母净利润, 净利润同比(%), 每股收益, 行业}}。"""
+    """一个报告期的全市场业绩报表：{代码: {公告日, 归母净利润, 净利润同比(%), 每股收益, 净资产收益率(%), 行业}}。"""
     last: Exception | None = None
     for url in REPORT_URLS:
         rows: dict[str, dict] = {}
@@ -298,6 +298,39 @@ def report_period(period: str) -> dict[str, dict]:
     raise SourceError(f"全市场财报摘要取不到：{last}")
 
 
+def _cached_period(cache, period: str, max_age: float) -> dict[str, dict]:
+    key = f"reports2:{period}"
+    rows = cache.get(key, max_age)
+    if rows is None:
+        rows = report_period(period)
+        if rows:
+            cache.set(key, rows)
+    return rows
+
+
+def annual_periods(today: date, n: int = 4) -> list[str]:
+    """today 之前最近的 n 个年报期，新的在前。"""
+    y = today.year - 1
+    return [f"{y - k}-12-31" for k in range(n)]
+
+
+def annual_roes(cache, today: date, years: int = 3) -> dict[str, list[float]]:
+    """每只股票最近几年年报的净资产收益率（%，新的在前，最多 years 个；只算今天之前已经公告的）。
+    年报一年才出一次：已经过了披露期的存 30 天，正在披露的那一期每 20 小时更新。"""
+    out: dict[str, list[float]] = {}
+    cutoff = today.isoformat()
+    for i, period in enumerate(annual_periods(today, years + 1)):
+        fresh = i == 0 and today.month <= 5              # 1–5 月：上一年的年报还在陆续披露
+        rows = _cached_period(cache, period, 20 * 3600 if fresh else 30 * 86400)
+        for code, r in rows.items():
+            if r.get("roe") is None or not r.get("notice") or r["notice"] > cutoff:
+                continue
+            got = out.setdefault(code, [])
+            if len(got) < years:
+                got.append(r["roe"])
+    return out
+
+
 def latest_reports(cache, today: date) -> dict[str, dict]:
     """每只股票已经披露的最新一期：{代码: {period, label, yoy(小数), profit, eps, industry, notice}}。
     行业取自任意一期（它不随报告期变）。已经过完披露期的报告期存 7 天，最新的一期每 20 小时更新。"""
@@ -305,12 +338,7 @@ def latest_reports(cache, today: date) -> dict[str, dict]:
     industry: dict[str, str] = {}
     cutoff = today.isoformat()
     for i, period in enumerate(recent_periods(today)):
-        key = f"reports:{period}"
-        rows = cache.get(key, 20 * 3600 if i == 0 else 7 * 86400)
-        if rows is None:
-            rows = report_period(period)
-            if rows:
-                cache.set(key, rows)
+        rows = _cached_period(cache, period, 20 * 3600 if i == 0 else 7 * 86400)
         for code, r in rows.items():
             if r.get("industry"):
                 industry.setdefault(code, r["industry"])

@@ -10,6 +10,9 @@
 
 统计用的是股票池（全市场成交活跃的几千只）的等权平均，不是上证指数：上证指数被几只大盘股左右，
 量不出「大多数股票」的状态。
+
+分数说的是「这几天」。另有一个慢得多的量——市场温度（temperature.py，全市场估值在近十年里的位置）——用来把关：
+温度 80 以上（很热）时，就算分数够了出手，历史上平均也是亏的，所以不出手；60 以上时优势小了一半多，只用轻仓。
 """
 
 from __future__ import annotations
@@ -148,6 +151,46 @@ def stance_of(score: int) -> tuple[str, str, str]:
                             "近十年里这样的日子做短线，十年有九年是亏的。空仓。")
 
 
+def apply_temperature(score: int, key: str, label: str, basis: str, temp: dict | None) -> tuple[str, str, str, dict | None]:
+    """用市场温度把关：很热不出手，偏热降一档，偏冷时信号更可靠。返回 (档位, 结论, 依据, 温度的影响说明)。"""
+    if not temp:
+        return key, label, basis, None
+    v = temp["value"]
+    by = ev.SHORT["by_temp"]
+    info = {"value": v, "label": temp["label"], "effect": "none", "text": ""}
+    if v >= 80:
+        old = by["ge80"]["old"]
+        info.update(effect="block", text=(f"市场温度 {v:.0f}（很热）。历史上温度 80 以上的日子，就算分数 ≥3 出手，平均每笔也是 {ev.pct(old['mean'])}、"
+                                          f"只有 {ev.share(old['win'])} 赚钱（{ev.OLD['short']}，共 {old['n']} 笔）——这种时候不做短线。"))
+        if key in ("go", "light"):
+            return "avoid", "不出手", info["text"], info
+    elif v >= 60:
+        new, old = by["ge60"]["new"], by["ge60"]["old"]
+        info.update(effect="halve", text=(f"市场温度 {v:.0f}（偏热）。历史上温度 60 以上时，分数 ≥3 的日子出手，平均每笔只有 {ev.pct(new['mean'])}（{ev.NEW['short']}）/ "
+                                          f"{ev.pct(old['mean'])}（{ev.OLD['short']}），优势小了一半多。"))
+        if key == "go":
+            return "light", "可以轻仓", f"分数 {score} 本来够出手，但{info['text']}所以只用轻仓。", info
+    elif v < 40:
+        new, old = by["lt40"]["new"], by["lt40"]["old"]
+        info.update(effect="boost", text=(f"市场温度 {v:.0f}（{temp['label']}），短线信号在这种时候最可靠：历史上温度 40 以下、分数 ≥3 的日子出手，平均每笔 "
+                                          f"{ev.pct(new['mean'])}（{ev.NEW['short']}）/ {ev.pct(old['mean'])}（{ev.OLD['short']}），{ev.share(new['win'])} 赚钱。"))
+    else:
+        info["text"] = f"市场温度 {v:.0f}（不冷不热），对短线没有额外的加减。"
+    return key, label, basis, info
+
+
+def temp_table(temp: dict | None) -> list[dict]:
+    """分数 ≥3 的日子按出手时的市场温度分开看：每笔平均、赚钱的比例。"""
+    rows = []
+    v = temp["value"] if temp else None
+    for (k, label), (lo, hi) in zip(ev.SHORT_TEMP_ROWS, ((0, 40), (40, 60), (60, 80), (80, 101))):
+        new, old = ev.SHORT["by_temp"][k]["new"], ev.SHORT["by_temp"][k]["old"]
+        rows.append({"label": label, "current": v is not None and lo <= v < hi,
+                     "new": {"n": new["n"], "mean": new["mean"], "win": new["win"]} if new else None,
+                     "old": {"n": old["n"], "mean": old["mean"], "win": old["win"]} if old else None})
+    return rows
+
+
 def evidence_table(score: int) -> list[dict]:
     rows = []
     for (label, lo, hi), new, old in zip(BUCKETS, ev.SCORE_TABLE["new"], ev.SCORE_TABLE["old"]):
@@ -239,8 +282,8 @@ def sector_moves(stocks: dict[str, Stock], industry: dict[str, str], min_count: 
     return sorted(rows, key=lambda r: -r["change_pct"])
 
 
-def compute(stocks: dict[str, Stock], calendar: list[int], industry: dict[str, str] | None = None) -> dict:
-    """今天的大盘预估。calendar：到今天为止的交易日（20261113 这样的整数，升序）。"""
+def compute(stocks: dict[str, Stock], calendar: list[int], industry: dict[str, str] | None = None, temp: dict | None = None) -> dict:
+    """今天的大盘预估。calendar：到今天为止的交易日（20261113 这样的整数，升序）；temp：temperature.compute 的结果。"""
     tb = build_table(stocks, calendar)
     j = len(calendar) - 1
     today = to_date(calendar[j])
@@ -250,12 +293,13 @@ def compute(stocks: dict[str, Stock], calendar: list[int], industry: dict[str, s
     parts = score_parts(m, nxt, window)
     score = total(parts)
     key, label, basis = stance_of(score)
+    key, label, basis, temp_info = apply_temperature(score, key, label, basis, temp)
     hist = history(tb)
     wait = td.trading_days_until_month_window(today)
     return {
         "score": score, "stance": key, "label": label, "basis": basis, "parts": parts,
         "facts": {**m, "next_day": nxt.isoformat(), "next_weekday": WEEKDAYS[nxt.weekday()], "window": window},
-        "table": evidence_table(score),
+        "table": evidence_table(score), "temp": temp_info, "temp_table": temp_table(temp),
         "recent": recent_check(hist),
         "style": style(tb, j, m, nxt),
         "hot_sectors": hot_sectors(stocks, industry or {}),

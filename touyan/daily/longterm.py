@@ -1,395 +1,315 @@
-"""长期（1–3 年）· 耐心溢价
+"""长期（2–3 年）· 低温买入
 
-对手盘：没有耐心的人。大部分资金按月、按季度被考核，对「三年后大概率更值钱、但下个月涨不涨不知道」的公司
-出价偏低。个人没有考核压力，可以拿时间换这部分差价——前提是公司真的经得起时间。
+长期能不能赚钱，主要看买的时候整个市场贵不贵，其次才是买了什么。这是把二十二年的行情翻下来最清楚的一条：
+- 市场温度（temperature.py）低于 40 时买入、拿两年：两个十年里 95% 以上的时候是赚的；80 以上买入的，之后两年没有赚过。
+  「温度低于 40 买、高于 80 卖」十八年半只换了 9 次仓，中证全指的年化从 +1.5% 变成 +10.1%，最大回撤从 60% 降到 35%。
+- 选股上，「挑好公司」的经典办法在 A 股并不灵：高 ROE、低市盈率各自分组看，都没有稳定的超额（高 ROE 那组近十年还是跑输的）。
+  站得住的是「回避」：一年波动最大的两成、换手最高的两成、被追捧的、两年半涨得最多的——这「四种热」之后一两年明显跑输；
+  每月剔一次，剩下的比全市场平均每年多 5–6 个点。
+- 行业是强者恒强：连续几年跑输的行业，之后一到三年继续落后（不是「跌多了就会补涨」）。所以长期走弱的行业不选。
 
-所以这里不看 K 线形态，只看三件事：
-- 生意稳不稳：连续几年的净资产收益率（ROE）不掉队，毛利率不大起大落；
-- 利润是不是真钱：经营现金流跟得上净利润，负债不过高；
-- 价格贵不贵：盈利收益率（市盈率的倒数）够高。
-
-预期收益不猜股价，拆成两部分算：每年分到手的股息，加上留在公司里的利润带来的增长。
-分红比例不用另找数据：一年里每股净资产增加了多少，没增加的那部分利润就是分掉了。
-估算偏保守（增长打七折、封顶 12%），并给出悲观和乐观两个情形。
-
-长期基金用另一把尺子：不比谁涨得多，比「大盘涨的时候跟不跟得上、跌的时候少不少亏」。
+于是这里的做法是：先看温度决定买不买；买的话，从「稳健名单」里挑——公司在赚钱、近一年有现金分红、
+近三年年报 ROE 没有低于 8% 的、不属于四种热、所在行业不在长期走弱里——按股息率从高到低排，同一行业大类最多两只。
+单只股票的运气成分很大（同样的规则挑 10 只，不同挑法十年下来年化能差出 10 个点），所以至少分散 8 只，
+或者干脆买指数基金；主动基金不推荐——过去三年业绩最好的那五分之一，之后三年反而比同类少赚 7 个点。
 """
 
 from __future__ import annotations
 
-import re
-from datetime import date, timedelta
+from . import evidence as ev
+from . import temperature as tp
+from .common import bucket_of, diversify, price
+from .features import Cross
+from .pool import Stock, day_int
 
-from .common import bucket_of, clip, diversify, is_financial, pct, pct_rank, price, tradable
-from .dca import rolling_stats
+KEY, TITLE, NAME = "long", "长期", "低温买入"
+HORIZON = "2–3 年"
+ROE_MIN = 8.0
+MIN_PICKS = 8
+BUY_BELOW, SELL_ABOVE = 40, 80
 
-KEY, TITLE, NAME = "long", "长期", "耐心溢价"
-HORIZON = "1–3 年"
-GROWTH_CAP, GROWTH_HAIRCUT = 0.12, 0.7
-DEFAULT_PAYOUT = 0.30
-
-IDEA = ("找生意稳、利润是真钱、价格不贵的公司，拿时间换回报。多数资金按季度考核，"
-        "对「三年后大概率更值钱、下个月不知道」的公司出价偏低；个人没有考核压力，可以赚这份耐心的钱。")
+IDEA = ("先看市场贵不贵，再决定买不买。市场温度低于 40 时买入、拿两三年，历史上几乎都是赚的；80 以上买入，之后两年没有赚过。"
+        "买什么反而是其次：从赚钱、分红、不热门、行业没在走下坡路的公司里分散着买，或者直接买指数基金。")
 HOW = [
-    "市值 150 亿以上、市盈率 40 倍以内、按市净率和市盈率推算的 ROE 不低于 10%（先从全市场初选 40 只）",
-    "近三年年报 ROE 最低不低于 8%、平均不低于 12%（银行、保险、券商放宽到 7% 和 9%）",
-    "利润是真钱：经营现金流平均不低于净利润的六成；负债率不超过 70%（金融企业不看这两项）",
-    "最新一期净利润同比没有下滑超过 10%",
-    "按「股息 + 内生增长」估算的预期年化从高到低排，同一大类最多两只",
+    "第一步 看温度：市场温度低于 40 才买；40–60 少买、慢买；60 以上不新买；80 以上分批卖出",
+    "第二步 稳健名单：公司在赚钱；近一年有现金分红；近三年年报 ROE 没有低于 8% 的",
+    "第三步 去掉四种热：一年波动最大的两成、换手最高的两成、被追捧的（冷热分最低的两成）、两年半涨得最多的两成",
+    "第四步 去掉长期走弱的行业：行业两年半的表现排在后三成、最近半年也在后一半（行业是强者恒强，不是跌多了就补涨）",
+    "按股息率从高到低排，同一行业大类最多两只；至少买 8 只，或者直接买下面的指数基金",
+    "卖出：温度到 80 以上分批卖；每个季度复查一次，不在名单里了（亏损、不分红、变热）就换；不设价格止损",
 ]
-FUND_HOW = [
-    "偏股基金：成立满 3 年、没有锁定期、A/C 份额只留一个，按近 3 年、2 年、1 年、6 个月的同类排名初选",
-    "比的是「涨的时候跟不跟得上、跌的时候少不少亏」：大盘上涨的月份平均跟上多少，下跌的月份平均跌多少",
-    "规模不到 2 亿、现任经理任职不到 2 年、量化体检评级为减持或卖出的不要",
+FAQ = [
+    {"q": "冷了很久、不景气了很久的行业，是不是更适合长期买？", "a": ev.FACTS["industry"] + ev.FACTS["industry_cheap"]},
+    {"q": "为什么不挑 ROE 高的白马股？",
+     "a": "分组检验过：近三年 ROE 都在 15% 以上的公司，近十年里拿一年平均比全市场少赚 2.6%，9 年里只有 4 年跑赢；更早的十年也少赚 2%。"
+          "好公司人人都知道，价格里早就算进去了。ROE 在这里只用来排除差的（低于 8% 的不要），不用来挑好的。"},
+    {"q": "为什么不推荐主动基金？", "a": ev.FACTS["fund"]},
+    {"q": "为什么不设止损？",
+     "a": "长期持有的股票，价格下跌本身不是卖出的理由——中期板块上检验过，加止损反而把收益砍掉一大半。"
+          "真正要卖的是三种情况：市场温度到 80 以上、公司不在稳健名单里了、股票变热了。风险靠「买得便宜」和「分散」来控制。"},
 ]
 
 
-# ── 股票 ──────────────────────────────────────────────────────────
-
-def prefilter(rows: list[dict], n: int = 80) -> list[dict]:
-    """全市场快照上的初选：够大、在赚钱、不太贵、推算的 ROE 过得去。"""
-    ok = []
-    for r in rows:
-        pe, pb, mv = r.get("pe"), r.get("pb"), r.get("total_mv")
-        if not tradable(r) or not pe or not pb or not mv or pe <= 0 or pe > 40 or pb <= 0 or mv < 1.5e10:
-            continue
-        roe = pb / pe                                   # 每股收益 / 每股净资产
-        if 0.10 <= roe <= 0.60:
-            ok.append(dict(r, roe_proxy=roe))
-    ep = pct_rank([1 / r["pe"] for r in ok])
-    roe = pct_rank([r["roe_proxy"] for r in ok])
-    for r, a, b in zip(ok, ep, roe):
-        r["pre_score"] = 0.5 * a + 0.5 * b
-    return sorted(ok, key=lambda r: -r["pre_score"])[:n]
+def stance_of(temp: dict | None) -> dict:
+    """现在该买、该拿、还是该卖。"""
+    if not temp:
+        return {"key": "unknown", "label": "温度没算出来", "text": "市场温度这次没有算出来，名单只供参考；等能算出温度再决定买不买。"}
+    v = temp["value"]
+    z = {r["key"]: r for r in temp["table"]}[temp["zone"]]
+    after = (f"历史上温度在这一档时买入中证全指，之后两年平均 {ev.pct(z['y2']['mean'], 0)}、{ev.share(z['y2']['win'])} 的日子是赚的；"
+             f"三年平均 {ev.pct(z['y3']['mean'], 0)}、{ev.share(z['y3']['win'])}。")
+    if v < BUY_BELOW:
+        return {"key": "buy", "label": "可以买入", "text": f"市场温度 {v:.0f}（{temp['label']}），低于 {BUY_BELOW}：是长期买入的时候。{after}"}
+    if v < 60:
+        return {"key": "hold", "label": "少买、慢买", "text": f"市场温度 {v:.0f}（{temp['label']}）：已经持有的继续拿；想新买的，最多先买计划的一半，剩下的等温度回到 {BUY_BELOW} 以下。{after}"}
+    if v < SELL_ABOVE:
+        return {"key": "pause", "label": "不再新买", "text": f"市场温度 {v:.0f}（{temp['label']}）：不再新买，已经持有的继续拿到 {SELL_ABOVE}。{after}"}
+    return {"key": "sell", "label": "分批卖出", "text": f"市场温度 {v:.0f}（{temp['label']}），高于 {SELL_ABOVE}：长期持有的股票和宽基指数基金分批卖出（比如每月卖三分之一）。{after}"}
 
 
-def annuals(periods: list) -> list:
-    return [p for p in periods if p.report_date.endswith("12-31")]
-
-
-def infer_payout(years: list) -> float | None:
-    """分红比例 ≈ 1 −（每股净资产一年的增加额 ÷ 每股收益）。"""
-    values = []
-    for cur, prev in zip(years, years[1:]):
-        if not cur.eps or cur.eps <= 0 or cur.bps is None or prev.bps is None or prev.bps <= 0:
-            continue
-        delta = cur.bps - prev.bps
-        if cur.bps < prev.bps * 0.8 or delta > cur.eps * 1.05:
-            continue                       # 送转股让每股净资产变小、增发让它猛增：这两种年份推不出分红
-        values.append(clip(1 - delta / cur.eps, 0.0, 0.9))
-    return sum(values) / len(values) if values else None
-
-
-def ttm_pe(row: dict, periods: list) -> float:
-    """滚动市盈率 = 现价 ÷ 最近四个季度的每股收益（最新一期累计 + 上年年报 − 上年同期累计）。
-    算不出来、或者和行情给的市盈率差得离谱（多半是送转过）时，用行情给的。"""
-    quoted = row["pe"]
-    latest, px = periods[0], row.get("price")
-    if not px or latest.eps is None:
-        return quoted
-    if latest.report_date.endswith("12-31"):
-        eps = latest.eps
-    else:
-        year = int(latest.report_date[:4])
-        last_annual = next((p for p in periods if p.report_date == f"{year - 1}-12-31"), None)
-        same = next((p for p in periods if p.report_date == f"{year - 1}{latest.report_date[4:]}"), None)
-        if not last_annual or not same or last_annual.eps is None or same.eps is None:
-            return quoted
-        eps = latest.eps + last_annual.eps - same.eps
-    if eps <= 0:
-        return quoted
-    pe = px / eps
-    return pe if 0.5 <= pe / quoted <= 2 else quoted
-
-
-def expected_return(pe: float, roe: float, payout: float) -> dict:
-    """roe、payout 都是小数。返回年化收益的估算和拆解。"""
-    ep = 1 / pe
-    dividend = payout * ep
-    raw_growth = max(roe * (1 - payout), 0.0)
-    growth = min(raw_growth, GROWTH_CAP) * GROWTH_HAIRCUT
-    return {"dividend": dividend, "growth": growth, "base": dividend + growth,
-            "low": dividend + 0.4 * growth - 0.02,           # 增长不及预期，估值还往下掉一点
-            "high": dividend + min(raw_growth, 0.15)}
-
-
-def assess(row: dict, periods: list | None, financial: bool) -> tuple[dict | None, str]:
-    """返回 (评估结果, 没通过的原因)。"""
-    if not periods:
-        return None, "财报没有取到"
-    years = annuals(periods)[:3]
-    roes = [y.roe for y in years if y.roe is not None]
-    if len(roes) < 2:
-        return None, "年报不足两年"
-    roe_min, roe_mean = min(roes), sum(roes) / len(roes)
-    need_min, need_mean = (7.0, 9.0) if financial else (8.0, 12.0)
-    if roe_min < need_min or roe_mean < need_mean:
-        return None, "ROE 不够高或者不够稳"
-    latest = periods[0]
-    if latest.net_profit_yoy is not None and latest.net_profit_yoy < -10:
-        return None, "最新一期利润下滑超过 10%"
-    cash = None
-    if not financial:
-        ratios = [y.ocf_per_share / y.eps for y in years if y.ocf_per_share is not None and y.eps and y.eps > 0]
-        cash = sum(ratios) / len(ratios) if ratios else None
-        if cash is not None and cash < 0.6:
-            return None, "经营现金流跟不上利润"
-        debt = latest.debt_ratio if latest.debt_ratio is not None else years[0].debt_ratio
-        if debt is not None and debt > 70:
-            return None, "负债率超过 70%"
-    payout = infer_payout(years)
-    assumed = payout is None
-    roe_use = min(roe_mean, roes[0]) / 100 if roes[0] < roe_mean * 0.8 else roe_mean / 100   # 最近一年明显变差就按最近的算
-    pe = ttm_pe(row, periods)
-    exp = expected_return(pe, roe_use, DEFAULT_PAYOUT if assumed else payout)
-    margins = [y.gross_margin for y in years if y.gross_margin is not None]
-    stable = None if financial or len(margins) < 2 else (max(margins) - min(margins)) / max(sum(margins) / len(margins), 1)
-    growth_ok = latest.net_profit_yoy is None or latest.net_profit_yoy >= 0
-    score = (clip(exp["base"] / 0.15, 0, 1) * 55 + clip(roe_min / roe_mean, 0, 1) * 15
-             + (10 if cash is None or cash >= 1 else 5) + (10 if stable is None or stable <= 0.15 else 4)
-             + (10 if growth_ok else 0))
-    return {"years": years, "latest": latest, "pe": pe, "roe_min": roe_min, "roe_mean": roe_mean, "cash": cash,
-            "payout": DEFAULT_PAYOUT if assumed else payout, "payout_assumed": assumed, "exp": exp,
-            "margins": margins, "debt": None if financial else (latest.debt_ratio or years[0].debt_ratio),
-            "financial": financial, "score": round(score, 1)}, ""
-
-
-def drawdown_info(closes: list[float]) -> dict | None:
-    if len(closes) < 120:
+def tier_key(temp: dict | None) -> str | None:
+    if not temp:
         return None
-    peak, worst = closes[0], 0.0
-    for c in closes:
-        peak = max(peak, c)
-        worst = min(worst, c / peak - 1)
-    return {"max_drawdown": worst, "from_high": closes[-1] / max(closes) - 1, "days": len(closes)}
+    v = temp["value"]
+    return "temp_0_20" if v < 20 else "temp_20_40" if v < 40 else "temp_40_60" if v < 60 else "temp_60_80" if v < 80 else "temp_80_100"
 
 
-def build_pick(row: dict, a: dict, dd: dict | None) -> dict:
-    exp, pe = a["exp"], a["pe"]
-    years = a["years"]
-    span = f"{years[-1].report_date[:4]}–{years[0].report_date[:4]}" if len(years) > 1 else years[0].report_date[:4]
+def expected(temp: dict | None) -> dict:
+    """按建仓时的市场温度：稳健名单拿两年、三年的历史结果。"""
+    k = tier_key(temp) or "temp_0_40"
+    rows = {(h, w): ev.LONG[f"steady_{h}"][w].get(k) for h in ("2y", "3y") for w in ("new", "old")}
+    label = {"temp_0_20": "20 以下", "temp_20_40": "20–40", "temp_40_60": "40–60", "temp_60_80": "60–80", "temp_80_100": "80 以上", "temp_0_40": "40 以下"}[k]
+
+    def part(h: str, name: str) -> str:
+        bits = [f"{w['short']}平均 {ev.pct(x['mean'], 0)}、{ev.share(x['win'])} 的时候赚钱（最差 {ev.pct(x['worst'], 0)}）"
+                for w, x in ((ev.NEW, rows[(h, "new")]), (ev.OLD, rows[(h, "old")])) if x]
+        return f"拿{name}：" + "；".join(bits) + "。" if bits else ""
+
+    text = (f"历史上在市场温度 {label} 时买入整个稳健名单（几百只，等权）：{part('2y', '两年')}{part('3y', '三年')}"
+            "只买其中几只的话，结果会比这个分散得多——这是「名单整体」的统计，不是单只股票的承诺。")
+    use = rows[("2y", "new")] or rows[("2y", "old")] or {}
+    use3 = rows[("3y", "new")] or rows[("3y", "old")] or {}
+    return {"available": bool(use), "kind": "hold", "reliable": True, "mean": use.get("mean"), "win_rate": use.get("win"),
+            "mean3": use3.get("mean"), "win3": use3.get("win"), "text": text}
+
+
+def candidates(stocks: dict[str, Stock], cross: Cross, rows: dict[str, dict], reports: dict[str, dict], roes: dict[str, list[float]],
+               heat: dict[str, dict], trends: dict[str, dict]) -> tuple[list[dict], dict, dict]:
+    """稳健名单，按股息率从高到低。返回 (名单, 没入选的原因计数, 每一步剩多少只)。"""
+    out, reasons = [], {}
+    steps = {"profit": 0, "dividend": 0, "roe": 0, "calm": 0, "industry": 0}
+
+    def miss(why):
+        reasons[why] = reasons.get(why, 0) + 1
+
+    for code, h in heat.items():
+        s = stocks[code]
+        row = rows.get(code) or {}
+        rep = reports.get(code) or {}
+        ind = rep.get("industry") or row.get("industry") or ""
+        roe = roes.get(code) or []
+        dy = s.dividend_yield
+        if not (row.get("pe") and row["pe"] > 0):
+            miss("公司在亏损，或者没有取到市盈率")
+            continue
+        steps["profit"] += 1
+        if dy is None:
+            miss("没有取到分红记录")
+            continue
+        if dy <= 0:
+            miss("近一年没有现金分红")
+            continue
+        steps["dividend"] += 1
+        if len(roe) < 2:
+            miss("年报不足两年，看不出 ROE 稳不稳")
+            continue
+        if min(roe) < ROE_MIN:
+            miss(f"近三年年报的 ROE 有低于 {ROE_MIN:.0f}% 的")
+            continue
+        steps["roe"] += 1
+        if h["kinds"]:
+            miss("属于「四种热」：" + h["kinds"][0])
+            continue
+        steps["calm"] += 1
+        trend = trends.get(ind)
+        if trend and trend["state"] == "weak":
+            miss("所在行业长期走弱")
+            continue
+        steps["industry"] += 1
+        out.append({"code": code, "name": row.get("name") or s.name, "industry": ind, "bucket": bucket_of(ind, s.name),
+                    "dy": dy, "div12": s.div12, "div_prev": s.div_prev, "roe": roe, "pe": row["pe"], "pb": row.get("pb"),
+                    "heat": h, "trend": trend, "growth": rep.get("yoy"), "report": rep.get("label", ""), "total_mv": row.get("total_mv")})
+    out.sort(key=lambda c: -c["dy"])
+    return out, dict(sorted(reasons.items(), key=lambda kv: -kv[1])), steps
+
+
+def build_pick(s: Stock, c: dict, temp: dict | None, stance: dict, as_of: str) -> dict:
+    close = s.c[-1]
+    h, trend, roe = c["heat"], c["trend"], c["roe"]
     evidence = [
-        {"label": "生意稳", "status": "pass",
-         "detail": f"{span} 年报 ROE 最低 {a['roe_min']:.1f}%、平均 {a['roe_mean']:.1f}%"},
-        {"label": "价格", "status": "pass" if pe <= 25 else "warn",
-         "detail": f"市盈率 {pe:.1f} 倍，每投 100 元一年对应 {100 / pe:.1f} 元利润"},
+        {"label": "分红", "status": "pass",
+         "detail": f"近一年每股现金分红 {c['div12']:.2f} 元，股息率 {c['dy'] * 100:.1f}%" + ("；前一年也分了" if (c.get("div_prev") or 0) > 0 else "；前一年没有分红记录")},
+        {"label": "盈利", "status": "pass",
+         "detail": f"近 {len(roe)} 年年报 ROE：" + "、".join(f"{x:.1f}%" for x in roe) + f"；市盈率 {c['pe']:.0f} 倍" + (f"，市净率 {c['pb']:.1f} 倍" if c.get("pb") else "")},
+        {"label": "不热", "status": "pass",
+         "detail": f"冷热分 {h['cold']:.0f}（100 最冷）；一年波动排在全市场 {h['vol_rank']:.0f}%、换手排在 {h['turn_rank']:.0f}%"
+                   + (f"；近两年半 {h['long'] * 100:+.0f}%" if h.get("long") is not None else "")},
     ]
-    if a["cash"] is not None:
-        evidence.append({"label": "利润是真钱", "status": "pass" if a["cash"] >= 0.8 else "warn",
-                         "detail": f"经营现金流平均是净利润的 {a['cash']:.1f} 倍"})
-    if a["debt"] is not None:
-        evidence.append({"label": "负债", "status": "pass" if a["debt"] <= 55 else "warn", "detail": f"资产负债率 {a['debt']:.0f}%"})
-    if len(a["margins"]) >= 2:
-        evidence.append({"label": "毛利率", "status": "pass",
-                         "detail": f"这几年在 {min(a['margins']):.0f}%–{max(a['margins']):.0f}% 之间"})
-    latest = a["latest"]
-    if latest.net_profit_yoy is not None:
-        evidence.append({"label": "最新财报", "status": "pass" if latest.net_profit_yoy >= 0 else "warn",
-                         "detail": f"{latest.report_name or latest.report_date}净利润同比 {latest.net_profit_yoy:+.1f}%"})
-    evidence.append({"label": "分红", "status": "warn" if a["payout_assumed"] else "pass",
-                     "detail": (f"分红比例推算不出来，按 {DEFAULT_PAYOUT * 100:.0f}% 估算" if a["payout_assumed"] else
-                                f"按净资产的增长推算，约 {a['payout'] * 100:.0f}% 的利润分给了股东")
-                               + f"，对应股息率约 {exp['dividend'] * 100:.1f}%"})
-    risks = ["这是按过去几年的经营情况估算的，行业变坏、公司变差时估算会落空"]
-    if dd:
-        evidence.append({"label": "回撤", "status": "warn" if dd["max_drawdown"] < -0.3 else "pass",
-                         "detail": f"过去 {dd['days'] / 245:.1f} 年最大跌过 {dd['max_drawdown'] * 100:.0f}%，"
-                                   f"现在距高点 {dd['from_high'] * 100:.0f}%"})
-        risks.insert(0, f"持有期间出现 {abs(dd['max_drawdown']) * 100:.0f}% 左右的浮亏是正常的，这笔钱要三年内用不着")
-    sell_pe = max(round(pe * 1.8), 33)
-    text = (f"预期年化约 {exp['base'] * 100:.1f}%（悲观 {exp['low'] * 100:.1f}%，乐观 {exp['high'] * 100:.1f}%）："
-            f"股息约 {exp['dividend'] * 100:.1f}% + 留存利润带来的增长约 {exp['growth'] * 100:.1f}%。"
-            "这是按财报推算的估计，不含估值涨跌，不是承诺。")
+    if trend:
+        evidence.append({"label": "行业", "status": "pass" if trend["state"] == "strong" else "info",
+                         "detail": f"{c['industry']}：近两年半比全部行业平均{'多' if trend['long'] >= 0 else '少'}涨 {abs(trend['long']) * 100:.0f}%，"
+                                   f"最近半年{'多' if trend['short'] >= 0 else '少'} {abs(trend['short']) * 100:.0f}%"
+                                   + ("——长期走强" if trend["state"] == "strong" else "")})
+    else:
+        evidence.append({"label": "行业", "status": "info", "detail": f"{c['industry'] or '行业没取到'}：公司太少，行业走势没法单独看"})
+    if c.get("growth") is not None:
+        evidence.append({"label": "最新财报", "status": "pass" if c["growth"] >= 0 else "warn", "detail": f"{c['report']}净利润同比 {c['growth'] * 100:+.0f}%"})
+    entry = {
+        "buy": "分两三次买入，每次隔两到四周。短期涨跌没人知道，分批买是为了买在平均价",
+        "hold": "现在不贵不便宜：最多先买计划的一半，剩下的等市场温度回到 40 以下再买",
+        "pause": "现在偏贵：先不买，放进自选等温度降下来",
+        "sell": "现在很贵：不买。已经持有的分批卖出",
+        "unknown": "市场温度没算出来：先不急着买",
+    }[stance["key"]]
+    risks = ["单只股票的运气成分很大：同样的规则挑 10 只，不同挑法十年下来年化能差出 10 个点——一定要分散，至少 8 只，或者直接买指数基金",
+             "持有期间出现 20%–30% 的浮亏是正常的（2018 年稳健名单整体跌了 26%），这笔钱要两三年内用不着"]
+    if stance["key"] in ("pause", "sell"):
+        risks.insert(0, f"现在市场温度 {temp['value']:.0f}，不是长期买入的时候，名单只供已经持有的人对照")
     return {
-        "key": f"{row['market']}:{row['code']}", "code": row["code"], "name": row.get("name", ""), "kind": "stock",
-        "industry": row.get("industry", ""), "price": price(row.get("price")), "as_of": "", "score": a["score"],
-        "headline": f"ROE 多年稳定在 {a['roe_min']:.0f}% 以上，市盈率 {pe:.0f} 倍，估算年化约 {exp['base'] * 100:.0f}%",
+        "key": s.key, "code": s.code, "name": c["name"], "kind": "stock", "industry": c["industry"],
+        "price": price(close), "as_of": as_of, "score": round(c["dy"] * 100, 1), "score_unit": "%",
+        "headline": f"股息率 {c['dy'] * 100:.1f}%，近三年 ROE 最低 {min(roe):.0f}%，不在热门里" + ("，行业长期走强" if trend and trend["state"] == "strong" else ""),
         "evidence": evidence, "risks": risks,
         "plan": {
-            "horizon": HORIZON, "hold_max": None,
-            "entry": "分 3 次买入，每次隔一个月。短期涨跌没人知道，分批买是为了买在平均价，不是为了抄底",
-            "ref_price": price(row.get("price")), "target_price": None, "target_pct": None, "stop_price": None, "stop_pct": None,
-            "position": "单只不超过总资金的两成",
+            "horizon": HORIZON, "hold_max": None, "entry": entry,
+            "ref_price": price(close), "target_price": None, "target_pct": None, "stop_price": None, "stop_pct": None,
+            "stop_note": "不设价格止损：价格下跌本身不是卖出的理由。跌多了就把下面三条卖出条件重新对一遍，没触发就继续拿。",
+            "position": "单只不超过总资金的一成，至少分散 8 只",
             "rules": [
-                "不设价格止损：价格下跌本身不是卖出的理由。跌幅超过 25% 时，把下面几条重新检查一遍，没触发就继续拿",
-                "卖出条件一：连续两期财报扣非净利润同比下滑",
-                f"卖出条件二：年度 ROE 跌破 {8 if not a['financial'] else 7}%，或者经营现金流连续两年不到净利润的一半",
-                f"卖出条件三（止盈）：涨得太贵——市盈率超过 {sell_pe} 倍时分批卖出",
-                "每个财报季（4 月底、8 月底、10 月底）回来看一次，平时不用盯",
+                f"市场温度到 {SELL_ABOVE} 以上：分批卖出（比如每月卖三分之一）——这是最要紧的一条",
+                "每个季度财报出来后复查一次（4 月底、8 月底、10 月底）：公司开始亏损、不再分红、或者年报 ROE 跌破 8%，换成名单里别的",
+                "变热了：冷热分掉到 20 以下，或者成了全市场波动、换手最高的两成——可以止盈，换成名单里别的（热门股之后一两年是跑输的）",
+                "所在行业转成「长期走弱」的，不用马上卖，但不要再加仓",
             ],
-            "expected": {"available": True, "reliable": True, "kind": "model", "annual": exp["base"], "low": exp["low"],
-                         "high": exp["high"], "dividend": exp["dividend"], "growth": exp["growth"], "text": text},
+            "expected": expected(temp),
         },
     }
 
 
-def select(rows: list[dict], n: int, financials=None, fill_industries=None, closes_of=None) -> dict:
-    """financials(rows) → {代码: 财报列表}；closes_of(row) → 收盘价序列（都可能取不到）。"""
-    short = prefilter(rows)
-    warning = fill_industries(short) if fill_industries and short else ""
-    for r in short:
-        r["bucket"] = bucket_of(r.get("industry", ""), r.get("name", ""))
-    short = diversify(short, 40, per_bucket=5)             # 初选名单也别被一个行业占满
-    fin = financials(short) if financials and short else {}
-    cands, reasons = [], {}
-    for row in short:
-        a, why = assess(row, fin.get(row["code"]), is_financial(row.get("industry", ""), row.get("name", "")))
-        if a is None:
-            reasons[why] = reasons.get(why, 0) + 1
-            continue
-        cands.append({"row": row, "a": a, "name": row.get("name", ""), "industry": row.get("industry", ""),
-                      "bucket": row["bucket"]})
-    cands.sort(key=lambda c: -c["a"]["score"])
-    picks = []
-    for c in diversify(cands, n):
-        dd = None
-        if closes_of:
-            try:
-                dd = drawdown_info(closes_of(c["row"]) or [])
-            except Exception:
-                dd = None
-        picks.append(build_pick(c["row"], c["a"], dd))
-    return {
-        "key": KEY, "title": TITLE, "name": NAME, "horizon": HORIZON, "idea": IDEA, "how": HOW,
-        "checkup": {"level": "model", "verdict": "长期收益没法用一年半的行情检验，这里的预期收益是按财报推算的：股息 + 留存利润带来的增长，"
-                                                "增长打七折、封顶 12%。它回答的是「如果公司继续像过去几年这样经营」，不含估值的涨跌。"},
-        "picks": picks,
-        "funnel": {"pool": len(rows), "candidates": len(short), "passed": len(cands), "picked": len(picks),
-                   "reasons": dict(sorted(reasons.items(), key=lambda kv: -kv[1]))},
-        "warnings": [warning] if warning else [],
-    }
+def industry_board(trends: dict[str, dict], top: int = 8) -> dict:
+    """行业风向：长期走强、长期走弱的各列几个。"""
+    rows = [{"name": k, **v} for k, v in trends.items()]
+    strong = sorted((r for r in rows if r["state"] == "strong"), key=lambda r: -r["long"])[:top]
+    weak = sorted((r for r in rows if r["state"] == "weak"), key=lambda r: r["long"])[:top]
+    f = ev.INDUSTRY["filter"]
+    note = (ev.FACTS["industry"] +
+            f"落到选股上：稳健名单里行业长期走弱的那些，拿两年平均 {ev.pct(f['new']['long|稳健 ∩ 行业长期走弱|两年']['ret'], 0)}（{ev.NEW['short']}）/ "
+            f"{ev.pct(f['old']['long|稳健 ∩ 行业长期走弱|两年']['ret'], 0)}（{ev.OLD['short']}）；行业长期走强的是 "
+            f"{ev.pct(f['new']['long|稳健 ∩ 行业长期走强|两年']['ret'], 0)} / {ev.pct(f['old']['long|稳健 ∩ 行业长期走强|两年']['ret'], 0)}。"
+            "这条只对长期有用——中期、短期按行业分开看没有差别。")
+    return {"strong": strong, "weak": weak, "count": len(rows), "weak_count": sum(1 for r in rows if r["state"] == "weak"),
+            "strong_count": sum(1 for r in rows if r["state"] == "strong"), "note": note}
 
 
-# ── 长期持有的基金 ────────────────────────────────────────────────
-
-LOCKUP_RE = re.compile(r"持有|定开|封闭|定期开放|养老目标")
-
-
-def share_class_key(name: str) -> str:
-    """「易方达蓝筹精选混合A」「易方达蓝筹精选混合C」视为同一只。"""
-    return re.sub(r"[（(]?[A-Z][)）]?$", "", name.strip())
-
-
-def fund_prefilter(rows: list[dict], today: date | None = None) -> list[dict]:
-    today = today or date.today()
-    cutoff = (today - timedelta(days=3 * 365 + 1)).isoformat()
-    stale = (today - timedelta(days=15)).isoformat()
-    out = []
-    for r in rows:
-        if not r.get("inception") or r["inception"] > cutoff:
-            continue                       # 成立不满 3 年，看不出长期能力
-        if r.get("y3") is None or r.get("y1") is None or (r.get("nav_date") or "") < stale:
-            continue
-        if LOCKUP_RE.search(r.get("name") or ""):
-            continue                       # 有锁定期，不适合大多数人
-        out.append(r)
-    return out
-
-
-def fund_perf_scores(rows: list[dict]) -> list[dict]:
-    """同类分位合成业绩分，并去掉重复份额（保留分高的那个）。"""
-    if not rows:
-        return []
-    ranks = {k: pct_rank([r.get(k) for r in rows], True, 30) for k in ("y3", "y2", "y1", "m6")}
-    for i, r in enumerate(rows):
-        r["perf_score"] = round(0.40 * ranks["y3"][i] + 0.25 * ranks["y2"][i] + 0.20 * ranks["y1"][i]
-                                + 0.15 * ranks["m6"][i], 1)
-        r["y3_rank_pct"] = round(100 - ranks["y3"][i], 1)    # 前百分之几
-    seen, out = set(), []
-    for r in sorted(rows, key=lambda x: -x["perf_score"]):
-        key = share_class_key(r["name"])
-        if key in seen or r["code"] in seen:
-            continue
-        seen.update((key, r["code"]))
-        out.append(r)
-    return out
-
-
-def capture(nav: list, bench: list) -> dict | None:
-    """按月比较：大盘上涨的月份基金平均跟上多少，下跌的月份平均跌多少。"""
-    def monthly(bars):
-        last = {}
-        for b in bars:
-            last[b.date[:7]] = b.adj_close
-        months = sorted(last)
-        return {m: last[m] / last[p] - 1 for p, m in zip(months, months[1:])}
-
-    f, b = monthly(nav), monthly(bench)
-    months = [m for m in f if m in b]
-    ups = [(f[m], b[m]) for m in months if b[m] > 0]
-    downs = [(f[m], b[m]) for m in months if b[m] < 0]
-    if len(months) < 24 or len(ups) < 6 or len(downs) < 6:
+def lump_stats(bars: list, months: tuple[int, ...] = (24, 36)) -> dict | None:
+    """这只基金：市场温度低于 40 的日子一次买入，拿满两年、三年的结果；以及任意一天买入的结果（对照）。"""
+    closes = [b.adj_close for b in bars if b.adj_close > 0]
+    days = [day_int(b.date) for b in bars if b.adj_close > 0]
+    if len(closes) < 5 * 245:
         return None
-    up = sum(x for x, _ in ups) / sum(y for _, y in ups)
-    down = sum(x for x, _ in downs) / sum(y for _, y in downs)
-    return {"up": up, "down": down, "edge": up - down, "months": len(months)}
+    temps = tp.temps_on(days)
+    out = {}
+    for m in months:
+        h = m * 245 // 12
+        cold = sorted(closes[i + h] / closes[i] - 1 for i in range(0, len(closes) - h, 5) if temps[i] is not None and temps[i] < BUY_BELOW)
+        any_ = sorted(closes[i + h] / closes[i] - 1 for i in range(0, len(closes) - h, 5) if temps[i] is not None)
+        hot = sorted(closes[i + h] / closes[i] - 1 for i in range(0, len(closes) - h, 5) if temps[i] is not None and temps[i] >= 60)
+        if len(cold) < 20 or len(any_) < 40:
+            return None
+        pack = lambda xs: {"n": len(xs), "win": sum(1 for x in xs if x > 0) / len(xs), "median": xs[len(xs) // 2], "worst": xs[0]} if xs else None
+        out[f"y{m // 12}"] = {"cold": pack(cold), "any": pack(any_), "hot": pack(hot)}
+    return out
 
 
-def fund_pick(row: dict, report: dict | None, nav: list, bench: list) -> tuple[dict | None, str]:
-    """体检 + 涨跌跟随度 → 入选或剔除。"""
-    if not report:
-        return None, "取不到基金档案"
-    profile = (report.get("fund") or {}).get("profile") or {}
-    scale = profile.get("scale")
-    if scale is not None and scale < 2:
-        return None, f"规模只有 {scale:.2f} 亿，有清盘风险"
-    managers = profile.get("managers") or []
-    tenures = [m["tenure_years"] for m in managers if m.get("tenure_years") is not None]
-    tenure = max(tenures) if tenures else None
-    if tenure is not None and tenure < 2:
-        return None, f"现任经理只管了 {tenure:.1f} 年，业绩未必是他的"
-    if report["scores"]["rating"]["code"] in ("Underweight", "Sell"):
-        return None, f"量化体检评级为{report['scores']['rating']['label']}"
-    cap = capture(nav, bench)
-    m3 = (report.get("metrics") or {}).get("3y") or {}
-    evidence = [{"label": "长期业绩", "status": "pass",
-                 "detail": f"近 3 年 {row['y3']:+.1f}%，排在同类前 {max(row.get('y3_rank_pct', 50), 1):.0f}%"}]
-    cap_score = 50.0
-    good = False
-    if cap:
-        cap_score = clip(50 + cap["edge"] * 100, 0, 100)
-        good = cap["up"] >= 0.8 and cap["edge"] > 0.1
-        down_text = (f"下跌的月份它跌了大盘的 {cap['down'] * 100:.0f}%" if cap["down"] > 0.05 else "下跌的月份它平均没有跟着跌")
-        evidence.append({"label": "涨跌跟随", "status": "pass" if good else "warn",
-                         "detail": f"近 {cap['months']} 个月里，沪深300 上涨的月份它跟上 {cap['up'] * 100:.0f}%，{down_text}"
-                                   + ("" if cap["up"] >= 0.8 else "——涨的时候跟不上")})
-    if m3.get("max_drawdown") is not None:
-        evidence.append({"label": "最大回撤", "status": "pass" if m3["max_drawdown"] > -0.25 else "warn",
-                         "detail": f"近 3 年最大回撤 {m3['max_drawdown'] * 100:.1f}%"})
-    if managers:
-        mgr = max(managers, key=lambda m: m.get("tenure_years") or 0)
-        evidence.append({"label": "基金经理", "status": "pass" if tenure is None or tenure >= 3 else "warn",
-                         "detail": f"{mgr.get('name', '')}" + (f"，任职 {tenure:.1f} 年" if tenure is not None else "")})
-    if scale is not None:
-        evidence.append({"label": "规模", "status": "pass" if scale <= 150 else "warn",
-                         "detail": f"{scale:.1f} 亿" + ("，偏大，调仓不灵活" if scale > 150 else "")})
-    hist = rolling_stats(nav, 250)
-    if hist:
-        text = (f"过去 {hist['years']} 年里任意一天买入、拿满一年：赚钱的概率 {hist['win_rate'] * 100:.0f}%，"
-                f"中位 {hist['median'] * 100:+.1f}%（较差的一成情况 {hist['p10'] * 100:+.1f}%，较好的一成 {hist['p90'] * 100:+.1f}%）。"
-                "基金的过去不代表未来，经理换人后尤其如此。")
-        expected = {"available": True, "reliable": True, "kind": "history", "median": hist["median"], "low": hist["p10"],
-                    "high": hist["p90"], "win_rate": hist["win_rate"], "text": text}
-    else:
-        expected = {"available": False, "text": "净值历史太短，给不出预期收益。"}
-    score = round(0.4 * row["perf_score"] + 0.3 * report["scores"]["composite"] + 0.3 * cap_score, 1)
-    dd = abs(m3["max_drawdown"]) * 100 if m3.get("max_drawdown") is not None else 25
+INDEX_WANTED = ("沪深300", "中证500", "红利低波", "中证红利", "上证50", "中证1000")
+
+
+def index_funds(cands: list[dict], nav_of, temp: dict | None, n: int = 3) -> dict:
+    """不想选股的：直接买指数基金。挑宽基和红利各一两只，给出「温度低于 40 时买入」在它自己历史上的结果。"""
+    picks = []
+    for want in INDEX_WANTED:
+        row = next((c for c in cands if c.get("index") == want), None)
+        if not row or len(picks) >= n or (want == "中证红利" and any(p["index"] == "红利低波" for p in picks)):
+            continue
+        try:
+            st = lump_stats(nav_of(row))
+        except Exception:
+            st = None
+        if not st:
+            continue
+        y2, y3 = st["y2"], st["y3"]
+        picks.append({
+            "key": f"OF:{row['code']}", "code": row["code"], "name": row["name"], "index": want, "group": row.get("group", ""),
+            "nav": row.get("nav"), "stats": st,
+            "why": (f"它自己的历史：市场温度低于 {BUY_BELOW} 的日子买入、拿两年，{y2['cold']['win'] * 100:.0f}% 赚钱，中位 {y2['cold']['median'] * 100:+.0f}%"
+                    f"（最差 {y2['cold']['worst'] * 100:+.0f}%）；拿三年，{y3['cold']['win'] * 100:.0f}% 赚钱，中位 {y3['cold']['median'] * 100:+.0f}%。"
+                    + (f"温度 60 以上买入、拿两年的只有 {y2['hot']['win'] * 100:.0f}% 赚钱，中位 {y2['hot']['median'] * 100:+.0f}%。" if y2.get("hot") else "")),
+            "rules": (["温度低于 40 时分两三次买入", "红利类不用按温度卖，可以一直拿着收分红"] if row.get("group") == "红利"
+                      else ["温度低于 40 时分两三次买入", f"温度到 {SELL_ABOVE} 以上分批卖出，等回到 40 以下再买回来"]),
+        })
+    return {"picks": picks,
+            "how": "不想选股、或者钱不够分散买 8 只：直接买指数基金，同样看温度。宽基（沪深300、中证500）跟着温度买卖；红利类波动小，可以一直拿。"
+                   "想每月投一点而不是一次买入的，看「定投」板块。",
+            "note": ev.FACTS["fund"]}
+
+
+def checkup() -> dict:
+    L = ev.LONG
+    z = {r["label"]: r for r in ev.TEMP["zones"]}
+    s2n, s2o = L["steady_2y"]["new"], L["steady_2y"]["old"]
+    cold_n, cold_o = s2n["temp_0_40"], s2o["temp_0_40"]
+    mid_n, mid_o = s2n["temp_40_80"], s2o["temp_40_80"]
+    hot_o = s2o.get("temp_80_100")
     return {
-        "key": f"OF:{row['code']}", "code": row["code"], "name": row["name"], "kind": "fund",
-        "industry": row.get("type", ""), "price": row.get("nav"), "as_of": row.get("nav_date", ""), "score": score,
-        "headline": ("涨的时候跟得上、跌的时候少亏" if good else "长期业绩靠前，经理稳定")
-                    + f"，近 3 年 {row['y3']:+.0f}%",
-        "evidence": evidence, "risks": ["主动基金靠的是基金经理，经理换人就要重新评估"],
-        "plan": {
-            "horizon": "3 年以上", "hold_max": None,
-            "entry": "一次买入或分 3 个月买入都可以；持有不满 7 天卖出要交 1.5% 的惩罚性赎回费",
-            "ref_price": row.get("nav"), "target_price": None, "target_pct": None, "stop_price": None, "stop_pct": None,
-            "position": "单只不超过总资金的两成", "fee": row.get("fee"),
-            "rules": [
-                "基金经理换人、规模跌破 2 亿、或者近 1 年业绩掉到同类后一半：重新评估，考虑换一只",
-                f"从买入价下跌超过 {dd:.0f}%（它近 3 年最大的一次回撤）时停下来复查，不是一跌就卖",
-                "赚到自己定的目标（比如年化 8%–10%）可以分批赎回",
-            ],
-            "expected": expected,
-        },
-    }, ""
+        "level": "ok",
+        "verdict": (f"长期的结果主要取决于买入时的市场温度。稳健名单在温度 40 以下买入、拿两年：{ev.NEW['short']}平均 {ev.pct(cold_n['mean'], 0)}、{ev.share(cold_n['win'])} 的时候赚钱；"
+                    f"{ev.OLD['short']}平均 {ev.pct(cold_o['mean'], 0)}、{ev.share(cold_o['win'])}。温度 40–80 之间买入的只有 {ev.pct(mid_n['mean'], 0)}、{ev.share(mid_n['win'])} / "
+                    f"{ev.pct(mid_o['mean'], 0)}、{ev.share(mid_o['win'])}；80 以上买入的（{ev.OLD['short']}）平均 {ev.pct(hot_o['mean'], 0)}，没有一次赚钱。"),
+        "more": [
+            ev.temp_strategy_text(),
+            f"选股这一步的作用小得多，而且只有近十年明显：稳健名单每月更新、连续持有，年化 {ev.pct(L['steady_cagr']['new'])}（{ev.NEW['short']}，全池 {ev.pct(L['all_cagr']['new'])}）/ "
+            f"{ev.pct(L['steady_cagr']['old'])}（{ev.OLD['short']}，全池 {ev.pct(L['all_cagr']['old'])}）；被剔掉的「四种热」是 {ev.pct(L['hot_cagr']['new'])} / {ev.pct(L['hot_cagr']['old'])}。"
+            "一次买入不动、拿满两年的话，稳健名单近十年比全池多 5.6 个点，更早的十年少 2.4 个点（那十年小盘股疯涨）。",
+            "单只股票分散不掉的运气：从名单里挑 10 只，按股息率挑近十年年化 +10.2%、更早的十年 +24.8%（全池 +4.3% / +23.6%）；"
+            "换成按低波动、按综合分去挑，结果能差出 5–10 个点。所以这里按股息率排、至少买 8 只。",
+            ev.FACTS["industry"],
+            f"最坏的情况：温度 40 以下买入稳健名单、拿两年，最差的一次是 {ev.pct(cold_n['worst'], 0)}（{ev.NEW['short']}）/ {ev.pct(cold_o['worst'], 0)}（{ev.OLD['short']}）；"
+            f"不看温度的话，拿一年最差 {ev.pct(L['steady_1y']['new']['worst'], 0)} / {ev.pct(L['steady_1y']['old']['worst'], 0)}。",
+            "这段历史里完整的冷热循环只有四五轮（低点在 2008、2012–2014、2018–2019、2024 年，高点在 2010、2015、2021、2026 年），"
+            "「低温买高温卖」的次数不多，不能当成定律；但每一轮方向一致，背后的道理（便宜的时候买）也说得通。",
+            "口径：每 21 个交易日建一次仓，名单里的股票等权，第二天开盘买入，扣 0.2%；财报、分红都只用当时已经公告的；包含后来退市的股票。",
+        ],
+        "by_year": {"new": {"steady": L["steady_by_year"]["new"], "all": L["all_by_year"]["new"], "hot": L["hot_by_year"]["new"]},
+                    "old": {"steady": L["steady_by_year"]["old"], "all": L["all_by_year"]["old"], "hot": L["hot_by_year"]["old"]}},
+        "strategy": {"hold": ev.TEMP["strategy"]["index"]["hold"], "rule": ev.TEMP["strategy"]["index"]["rule"]},
+    }
+
+
+def select(stocks: dict[str, Stock], cross: Cross, rows: dict[str, dict], reports: dict[str, dict], roes: dict[str, list[float]],
+           heat: dict[str, dict], trends: dict[str, dict], temp: dict | None, as_of: str, n: int) -> dict:
+    stance = stance_of(temp)
+    cands, reasons, steps = candidates(stocks, cross, rows, reports, roes, heat, trends)
+    picked = diversify(cands, max(n, MIN_PICKS))
+    board = {
+        "key": KEY, "title": TITLE, "name": NAME, "horizon": HORIZON, "idea": IDEA, "how": HOW,
+        "stance": stance, "temp": temp,
+        "picks": [build_pick(stocks[c["code"]], c, temp, stance, as_of) for c in picked],
+        "industry": industry_board(trends) if trends else None,
+        "funnel": {"pool": len(heat), "candidates": len(cands), "picked": len(picked), "reasons": reasons, "steps": steps},
+        "checkup": checkup(), "faq": FAQ, "warnings": [],
+    }
+    if not roes:
+        board["warnings"].append("近几年的年报摘要没取到，长期板块这次没法检查 ROE，名单是空的")
+    if not trends:
+        board["warnings"].append("行业走势这次没有算出来（行业分类没取到），长期板块没有按行业过滤")
+    return board

@@ -172,8 +172,32 @@ def _fetch_rows(symbol: str, days: int, fq: str) -> list[list]:
     return parse_raw_kline(resp.text, symbol)
 
 
+def dividend_info(closes: list[float], events: dict[int, str], factors: list[float], window: int = 250) -> dict:
+    """最近一年、再往前一年的现金分红（每股，折成今天的股数口径），以及按最新收盘价算的股息率。
+
+    events: {除权日下标: 分红送转文字}。除权日那天的每股派息是按除权前的股数说的，乘上前一天的复权系数就折成了今天的口径。
+    """
+    n = len(closes)
+    recent = earlier = 0.0
+    for k, text in events.items():
+        parsed = parse_dividend(text) if 0 < k < n else None
+        if not parsed or parsed[0] <= 0:
+            continue
+        cash = parsed[0] * factors[k - 1]
+        if k >= n - window:
+            recent += cash
+        elif k >= n - 2 * window:
+            earlier += cash
+    return {"div12": round(recent, 4), "div_prev": round(earlier, 4), "yield": recent / closes[-1] if closes and closes[-1] > 0 else None}
+
+
 def kline_true(symbol: str, days: int = MAX_BARS) -> list[Bar]:
     """A 股最近 days（≤640）根日线，等比复权。开高低收是复权价，成交量、成交额、换手率是当天的实际值。"""
+    return kline_true_ex(symbol, days)[0]
+
+
+def kline_true_ex(symbol: str, days: int = MAX_BARS) -> tuple[list[Bar], dict]:
+    """同 kline_true，另外返回分红信息（见 dividend_info）——除权记录本来就在这份行情里，不用另外去取。"""
     rows = [r for r in _fetch_rows(symbol, days, "") if num(r[2])]
     if not rows:
         raise NoData("腾讯行情没有该品种的 K 线数据")
@@ -199,7 +223,7 @@ def kline_true(symbol: str, days: int = MAX_BARS) -> list[Bar]:
         bars.append(Bar(date=str(r[0])[:10], open=o * f, high=h * f, low=lo * f, close=c * f,
                         volume=(num(r[5]) or 0.0) / divisor, turnover=num(r[7]) if len(r) > 7 else None,
                         amount=amount * 10000 if amount is not None else None))
-    return bars
+    return bars, dividend_info(closes, events, factors)
 
 
 def parse_quote_text(text: str, symbol: str) -> tuple[str, Quote]:

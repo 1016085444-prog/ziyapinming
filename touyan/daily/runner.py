@@ -171,10 +171,10 @@ def pool_fetch(router):
     def fetch(row: dict, days: int):
         prefix = {"SH": "sh", "SZ": "sz", "BJ": "bj"}.get(row["market"], "sz")
         try:
-            return tencent.kline_true(prefix + row["code"], days)
+            return tencent.kline_true_ex(prefix + row["code"], days)
         except SourceError:
             inst = symbols.from_key(f"{row['market']}:{row['code']}", "stock", row.get("name", ""))
-            return router.series(inst, days)[0]
+            return router.series(inst, days)[0], None
     return fetch
 
 
