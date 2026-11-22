@@ -209,7 +209,7 @@ def checkup(recent: dict) -> dict:
         "baseline": new["base"], "avg_days": new["days"], "span": "十年", "stocks": ev.NEW["pool"],
         "verdict": (f"通过了两个十年的检验。{ev.NEW['label']}：分数 ≥3 的日子按规则买入共 {new['n']} 笔，{new['win'] * 100:.0f}% 赚钱，"
                     f"平均每笔 {ev.pct(new['mean'])}（同样的日子随便买是 {ev.pct(new['base'])}）；"
-                    f"{ev.OLD['label']}：{old['n']} 笔，{old['win'] * 100:.0f}% 赚钱，平均 {ev.pct(old['mean'])}，12 年里只有 {ev.years(old['bad_years'])}是亏的。"),
+                    f"{ev.OLD['label']}：{old['n']} 笔，{old['win'] * 100:.0f}% 赚钱，平均 {ev.pct(old['mean'])}，12 年里{('只有 ' + ev.years(old['bad_years']) + '是亏的') if old['bad_years'] else '没有一年是亏的'}。"),
         "more": [
             f"对照一：同样的选股规则每天都用，{every['n']} 笔里只有 {every['win'] * 100:.0f}% 赚钱，平均 {ev.pct(every['mean'], 2)}——等于没用。",
             f"对照二：专挑分数 ≤−1 的日子用，{bad['win'] * 100:.0f}% 赚钱，平均 {ev.pct(bad['mean'], 2)}。所以分数不够的日子不出手。",

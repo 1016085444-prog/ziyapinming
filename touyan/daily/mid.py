@@ -113,7 +113,7 @@ def expected(temp: dict | None) -> dict:
     if tier:
         tn, to = ev.MID["by_temp"][tier]["new"], ev.MID["by_temp"][tier]["old"]
         label = dict(ev.MID_TEMP_ROWS)[tier]
-        text += (f"今天的市场温度是 {temp['value']:.0f}：历史上在温度 {label}时买入，"
+        text += (f"今天的市场温度是 {temp['value']:.0f}：历史上在温度 {label} 的时候买入，"
                  + "；".join(f"{w['short']}平均 {ev.pct(x['mean'])}、{x['win'] * 100:.0f}% 赚钱" for w, x in ((ev.NEW, tn), (ev.OLD, to)) if x) + "。")
         use = tn or to or new
     text += f"亏钱的年份：{ev.years(new['bad_years'])}——大盘不好的年份它也会亏，只是亏得比随便买少。"

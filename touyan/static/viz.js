@@ -146,7 +146,7 @@
     };
     return figure({ title: o.title, sub: o.sub, note: o.note, table: table }, function (W, api) {
       api.setLegend(series.length > 1 ? series.map(function (s, k) { return { name: s.name, cls: s.cls || ('s' + (k + 1)) }; }) : null);
-      var Hh = o.height || 200, padL = 46, padR = 8, padT = 14, padB = 26;
+      var Hh = o.height || 200, padL = 56, padR = 8, padT = 14, padB = 26;
       var all = [];
       series.forEach(function (s) { s.values.forEach(function (v) { if (v !== null && v !== undefined && isFinite(v)) all.push(v); }); });
       var lo = Math.min(0, Math.min.apply(null, all)), hi = Math.max(0, Math.max.apply(null, all));
@@ -164,7 +164,8 @@
       var gap = 2;
       var bw = Math.max(2, Math.min(24, (band * 0.72 - gap * (n - 1)) / n));
       var group = bw * n + gap * (n - 1);
-      var every = o.every || Math.max(1, Math.ceil(cats.length * 34 / pw));
+      var longest = cats.reduce(function (m, c) { return Math.max(m, String(c).length); }, 0);
+      var every = o.every || Math.max(1, Math.ceil((longest * 6.6 + 10) / band));
       cats.forEach(function (c, i) {
         var x0 = padL + band * i + (band - group) / 2;
         if (o.highlight === i) add(svg, S('rect', { x: padL + band * i + 1, y: padT, width: band - 2, height: ph, class: 'viz-hl' }));
@@ -180,7 +181,8 @@
           }, c);
           add(svg, bar);
         });
-        if (i % every === 0 || o.highlight === i) add(svg, S('text', { x: padL + band * (i + 0.5), y: Hh - 8, class: 'viz-tick' + (o.highlight === i ? ' strong' : ''), 'text-anchor': 'middle' }, c));
+        var nearHl = o.highlight !== undefined && o.highlight !== null && o.highlight >= 0 && i !== o.highlight && Math.abs(i - o.highlight) < every;
+        if ((i % every === 0 && !nearHl) || o.highlight === i) add(svg, S('text', { x: padL + band * (i + 0.5), y: Hh - 8, class: 'viz-tick' + (o.highlight === i ? ' strong' : ''), 'text-anchor': 'middle' }, c));
         if (o.highlight === i && n === 1) {
           var hv = series[0].values[i];
           if (hv !== null && isFinite(hv)) add(svg, S('text', { x: padL + band * (i + 0.5), y: y(hv) + (hv >= 0 ? -5 : 13), class: 'viz-label', 'text-anchor': 'middle' }, fmt(hv)));
@@ -268,8 +270,21 @@
         layouts.push({ p: p, Y: Y, top: top, h: ph, fmt: fmt });
         top += ph + gapP;
       });
-      var every = Math.max(1, Math.ceil(n * 56 / pw));
-      for (var i = 0; i < n; i += every) add(svg, S('text', { x: X(i), y: total - 8, class: 'viz-tick', 'text-anchor': i === 0 ? 'start' : 'middle' }, x[i]));
+      /* 横轴标签：按实际宽度排，前一个的右边和后一个的左边至少隔开 8px，不重叠 */
+      var lastRight = -1e9;
+      for (var i = 0; i < n; i++) {
+        var label = String(x[i]);
+        var w = label.length * 6.6;
+        var anchor = 'middle', left = X(i) - w / 2;
+        if (i === 0) { anchor = 'start'; left = X(i); }
+        else if (left + w > W - 2) {
+          if (i < n - 1) continue;
+          anchor = 'end'; left = X(i) - w;   /* 最后一个（最新的日期）靠右对齐，不出界 */
+        }
+        if (left < lastRight + 8) continue;
+        add(svg, S('text', { x: X(i), y: total - 8, class: 'viz-tick', 'text-anchor': anchor }, label));
+        lastRight = left + w;
+      }
       /* 十字光标：对齐最近的那个点，提示里列出这一列所有序列的数值 */
       var cross = S('line', { y1: padT, y2: total - padB, class: 'viz-cross', visibility: 'hidden' });
       add(svg, cross);
@@ -339,12 +354,14 @@
     var fmt = o.fmt || pctFmt(0);
     var rows = o.rows;
     return figure({ title: o.title, sub: o.sub, note: o.note, table: { head: [o.catLabel || ''].concat(o.valueLabel || '数值', o.noteLabel ? [o.noteLabel] : []), rows: rows.map(function (r) { return [r.label, fmt(r.value)].concat(o.noteLabel ? [r.note || ''] : []); }) } }, function (W, api) {
-      var rowH = 24, padT = 4, nameW = Math.min(150, Math.max(84, W * 0.26)), padR = 56;
+      var rowH = 24, padT = 4, nameW = Math.min(150, Math.max(84, W * 0.26));
       var Hh = padT * 2 + rowH * rows.length;
       var vals = rows.map(function (r) { return r.value; });
       var lo = Math.min(0, Math.min.apply(null, vals)), hi = Math.max(0, Math.max.apply(null, vals));
-      var pw = W - nameW - padR;
-      var Xv = function (v) { return nameW + (v - lo) / (hi - lo || 1) * pw; };
+      /* 负数的数字标在条的左端外面，所以有负数时在名字和条之间留一段空，不和名字挤在一起 */
+      var gutL = lo < 0 ? 52 : 0, padR = hi > 0 ? 56 : 8;
+      var pw = W - nameW - gutL - padR;
+      var Xv = function (v) { return nameW + gutL + (v - lo) / (hi - lo || 1) * pw; };
       var svg = S('svg', { width: W, height: Hh, viewBox: '0 0 ' + W + ' ' + Hh, role: 'img', 'aria-label': (o.title || '横向条形图') + '。数值见下方「看数字」' });
       add(svg, S('line', { x1: Xv(0), x2: Xv(0), y1: padT, y2: Hh - padT, class: 'viz-axis' }));
       rows.forEach(function (r, i) {
@@ -369,7 +386,7 @@
     var rows = o.rows;
     return figure({ title: o.title, sub: o.sub, note: o.note, table: { head: [o.catLabel || ''].concat(o.names), rows: rows.map(function (r) { return [r.label, fmt(r.a), fmt(r.b)]; }) } }, function (W, api) {
       api.setLegend([{ name: o.names[0], cls: 'mute', shape: 'dot' }, { name: o.names[1], cls: 's1', shape: 'dot' }]);
-      var rowH = 26, padT = 6, padB = 24, nameW = Math.min(150, Math.max(84, W * 0.26)), padR = 52;
+      var rowH = 26, padT = 6, padB = 24, nameW = Math.min(150, Math.max(84, W * 0.26)), padR = 66;
       var Hh = padT + padB + rowH * rows.length;
       var vals = [];
       rows.forEach(function (r) { [r.a, r.b].forEach(function (v) { if (v !== null && v !== undefined && isFinite(v)) vals.push(v); }); });

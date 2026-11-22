@@ -83,11 +83,12 @@ def expected(temp: dict | None) -> dict:
     label = {"temp_0_20": "20 以下", "temp_20_40": "20–40", "temp_40_60": "40–60", "temp_60_80": "60–80", "temp_80_100": "80 以上", "temp_0_40": "40 以下"}[k]
 
     def part(h: str, name: str) -> str:
-        bits = [f"{w['short']}平均 {ev.pct(x['mean'], 0)}、{ev.share(x['win'])} 的时候赚钱（最差 {ev.pct(x['worst'], 0)}）"
+        bits = [f"{w['short']}平均 {ev.pct(x['mean'], 0)}、{ev.share(x['win'])} 的时候赚钱（最差 {ev.pct(x['worst'], 0)}；"
+                f"{x['n']} 个月是这个温度{'，样本少，只作参考' if x['n'] < 10 else ''}）"
                 for w, x in ((ev.NEW, rows[(h, "new")]), (ev.OLD, rows[(h, "old")])) if x]
         return f"拿{name}：" + "；".join(bits) + "。" if bits else ""
 
-    text = (f"历史上在市场温度 {label}的时候买入整个稳健名单（几百只，等权）：{part('2y', '两年')}{part('3y', '三年')}"
+    text = (f"历史上在市场温度 {label}{' ' if label[-1].isdigit() else ''}的时候买入整个稳健名单（几百只，等权，每月看一次）：{part('2y', '两年')}{part('3y', '三年')}"
             "只买其中几只的话，结果会比这个分散得多——这是「名单整体」的统计，不是单只股票的承诺。")
     use = rows[("2y", "new")] or rows[("2y", "old")] or {}
     use3 = rows[("3y", "new")] or rows[("3y", "old")] or {}
@@ -262,12 +263,19 @@ def index_funds(cands: list[dict], nav_of, temp: dict | None, n: int = 3) -> dic
         if not st:
             continue
         y2, y3 = st["y2"], st["y3"]
+        hot = y2.get("hot")
+        if not hot:
+            hot_text = ""
+        elif hot["win"] < y2["cold"]["win"] - 0.1:
+            hot_text = f"温度 60 以上买入、拿两年的只有 {hot['win'] * 100:.0f}% 赚钱，中位 {hot['median'] * 100:+.0f}%。"
+        else:
+            hot_text = f"温度 60 以上买入、拿两年也有 {hot['win'] * 100:.0f}% 赚钱，中位 {hot['median'] * 100:+.0f}%——它受市场温度的影响小。"
         picks.append({
             "key": f"OF:{row['code']}", "code": row["code"], "name": row["name"], "index": want, "group": row.get("group", ""),
             "nav": row.get("nav"), "stats": st,
             "why": (f"它自己的历史：市场温度低于 {BUY_BELOW} 的日子买入、拿两年，{y2['cold']['win'] * 100:.0f}% 赚钱，中位 {y2['cold']['median'] * 100:+.0f}%"
                     f"（最差 {y2['cold']['worst'] * 100:+.0f}%）；拿三年，{y3['cold']['win'] * 100:.0f}% 赚钱，中位 {y3['cold']['median'] * 100:+.0f}%。"
-                    + (f"温度 60 以上买入、拿两年的只有 {y2['hot']['win'] * 100:.0f}% 赚钱，中位 {y2['hot']['median'] * 100:+.0f}%。" if y2.get("hot") else "")),
+                    + hot_text),
             "rules": (["温度低于 40 时分两三次买入", "红利类不用按温度卖，可以一直拿着收分红"] if row.get("group") == "红利"
                       else ["温度低于 40 时分两三次买入", f"温度到 {SELL_ABOVE} 以上分批卖出，等回到 40 以下再买回来"]),
         })
