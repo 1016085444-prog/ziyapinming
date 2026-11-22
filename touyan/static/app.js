@@ -1136,7 +1136,7 @@
       if (st.running) {
         fill(status, h('div', null, h('span', { class: 'spinner' }), ' ', (st.stage ? st.stage + '：' : '') + (st.message || '')),
           h('div', { class: 'meter' }, h('i', { style: { width: (st.percent || 0) + '%' } })),
-          h('div', { class: 'small muted' }, '每天第一次要下载全市场三四千只活跃股票的日线，大约 5–8 分钟；同一天再生成不到一分钟。可以先去别的页面，回来再看。'));
+          h('div', { class: 'small muted' }, '每天第一次要下载全市场四千多只股票的日线，大约 5–10 分钟；同一天再生成只要十几秒。可以先去别的页面，回来再看。'));
       } else {
         fill(status, h('span', { class: 'bad-mark' }, '上次生成失败：'), st.error);
       }
@@ -1188,7 +1188,7 @@
     if (!isNew) {
       setView(head, tools, status, card(null, null, h('div', { class: 'empty' },
         p ? '这条记录是旧版本生成的，方法和现在的不同，不再展示。' + (meta.can_run ? '点右上角重新生成。' : '')
-          : (meta.can_run ? '还没有生成过。点右上角「生成今日精选」，第一次大约 5–8 分钟。' : '还没有生成过。'))), dailyHistory(null));
+          : (meta.can_run ? '还没有生成过。点右上角「生成今日精选」，第一次大约 5–10 分钟。' : '还没有生成过。'))), dailyHistory(null));
       return;
     }
 

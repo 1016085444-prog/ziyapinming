@@ -136,7 +136,7 @@ def cmd_daily(args) -> int:
 
     cache = Cache(config.CACHE_PATH)
     store = Store(config.DB_PATH)
-    print("生成每日精选（短期 / 中期 / 长期 / 定投），约 3–5 分钟……")
+    print("生成每日精选（短期 / 中期 / 长期 / 定投）：第一次约 5–10 分钟，同一天再生成十几秒……")
 
     def progress(stage, message, percent):
         print(f"  [{percent:>3}%] {stage}：{message}", flush=True)

@@ -23,8 +23,9 @@ https://github.com/ZhuLinsen/daily_stock_analysis），其选股引擎源自 Alp
 - daily/common.py：按行业大类分散（同一大类限制只数）的做法来自其策略里的组合分散规则。
 - 「全市场快照 → 筛选 → 把结论写成可执行的计划」的流程参照其选股引擎与决策仪表盘。
 
-四个板块的选法（daily/short.py、mid.py、longterm.py、dca.py）和检验方式（daily/sim.py）是本项目设计的，
-思路参考了公开的学术研究（见 README「思路来源」），没有使用上述项目的策略参数，也未复制其代码。
+市场温度（daily/temperature.py）、大盘预估分（daily/gauge.py）、四个板块的选法（daily/short.py、mid.py、
+longterm.py、dca.py）和检验方式（daily/sim.py、research/）是本项目设计的，思路参考了公开的学术研究
+（见 README「思路来源」），没有使用上述项目的策略参数，也未复制其代码。
 
 数据接口的地址、参数与字段含义参考了 akshare（MIT License，
 https://github.com/akfamily/akshare）的实现，未复制其代码。
