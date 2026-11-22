@@ -143,6 +143,32 @@ class ReportsTest(unittest.TestCase):
         self.assertEqual(rep["600003"]["period"], "2026-06-30", "三季报还没出的，用最近一期")
         self.assertEqual(rep["600001"]["industry"], "白酒Ⅱ")
 
+    def test_quarter_profits(self):
+        tables = {"2026-09-30": {"600001": {"profit": 9e8}, "600002": {"profit": 3e8}},
+                  "2026-06-30": {"600001": {"profit": 5e8}, "600002": {"profit": 2e8}, "600003": {"profit": 2e8}},
+                  "2025-09-30": {"600001": {"profit": 6e8}},
+                  "2025-06-30": {"600001": {"profit": 4e8}, "600003": {"profit": 1e8}},
+                  "2026-03-31": {"600003": {"profit": 0.5e8}, "600004": {"profit": 1e8}},
+                  "2025-03-31": {"600003": {"profit": 0.4e8}, "600004": {"profit": 2e8}}}
+        latest = {"600001": {"period": "2026-09-30", "label": "2026年三季报", "notice": "2026-10-28"},
+                  "600002": {"period": "2026-09-30", "label": "2026年三季报", "notice": "2026-10-29"},
+                  "600003": {"period": "2026-06-30", "label": "2026年中报", "notice": "2026-08-20"},
+                  "600004": {"period": "2026-03-31", "label": "2026年一季报", "notice": "2026-04-20"},
+                  "600005": {"period": "", "industry": "银行Ⅱ"}}
+        cache = Cache(None)
+        self.addCleanup(cache.close)
+        with mock.patch.object(universe, "report_period", side_effect=lambda p: tables.get(p, {})) as call:
+            q = universe.quarter_profits(cache, date(2026, 11, 13), latest)
+        self.assertEqual((q["600001"]["sq"], q["600001"]["sq_ly"]), (4e8, 2e8), "单季 = 本期累计 − 上一期累计")
+        self.assertNotIn("600002", q, "去年同季没有数据的不算")
+        self.assertEqual((q["600003"]["sq"], q["600003"]["sq_ly"]), (1.5e8, 0.6e8))
+        self.assertEqual((q["600004"]["sq"], q["600004"]["sq_ly"]), (1e8, 2e8), "一季报的累计就是单季")
+        self.assertNotIn("600005", q)
+        self.assertEqual(q["600001"]["label"], "2026年三季报")
+        self.assertLessEqual(call.call_count, 6, "只取用得到的报告期")
+        self.assertEqual(universe.prev_quarter("2026-12-31"), "2026-09-30")
+        self.assertIsNone(universe.prev_quarter("2026-03-31"))
+
 
 # ── 交易日历 ──────────────────────────────────────────────────────
 
@@ -406,6 +432,23 @@ class GaugeTest(unittest.TestCase):
         self.assertTrue(rows[0]["current"])
         self.assertIsNone(rows[3]["new"], "近十年没有温度 80 以上又分数够的日子")
 
+    def test_tiers(self):
+        cases = {(4, 50): "strong", (3, 30): "strong", (5, 65): "light", (3, 50): "normal", (3, 65): "light", (2, 30): "light",
+                 (2, 65): "none", (6, 85): "none", (1, 10): "none", (4, None): "strong", (3, None): "normal", (2, None): "light"}
+        for (score, v), want in cases.items():
+            self.assertEqual(gauge.tier_of(score, v), want, (score, v))
+        key, label, basis, info = gauge.apply_temperature(3, "go", "可以出手", "依据", {"value": 14, "label": "很冷"})
+        self.assertEqual((key, info["tier"]), ("go", "strong"))
+        self.assertIn("把握大", label)
+        self.assertIn("没有一年是亏的", basis)
+        key, label, basis, _ = gauge.apply_temperature(2, "light", "可以轻仓", "依据", {"value": 65, "label": "偏热"})
+        self.assertEqual((key, label), ("wait", "不出手"), "分数 2 但市场偏热：两个十年都不赚钱，不出手")
+        rows = gauge.tier_table(2, {"value": 65})
+        self.assertEqual([r["key"] for r in rows if r["current"]], ["skip_s2_hot"])
+        self.assertEqual([r["key"] for r in gauge.tier_table(3, {"value": 14}) if r["current"]], ["strong"])
+        self.assertFalse([r for r in gauge.tier_table(0, {"value": 14}) if r["current"]], "分数不够的日子不在任何一档")
+        self.assertGreater(evidence.SHORT["strong"]["new"]["mean"], evidence.SHORT["normal"]["new"]["mean"])
+
     def test_compute_on_a_crash_day(self):
         stocks = {}
         for i in range(60):
@@ -477,6 +520,13 @@ class BoardsTest(unittest.TestCase):
         self.assertEqual(b["etfs"]["picks"][0]["price"], 2.5)
         self.assertIn("两个十年", b["checkup"]["verdict"])
         self.assertIn("by_year", b["checkup"])
+        self.assertTrue(p["badge"].startswith("5 天"), "卡片上显示它入选的理由，不显示几乎一样的排序分")
+        self.assertIn("等额", b["equal"]["text"])
+        self.assertEqual(len(b["equal"]["rank"]["new"]), 10)
+        self.assertEqual(p["plan"]["expected"]["tier"], "normal", "没有档位信息时按「一般」算")
+        strong = short.select(self.stocks, self.crosses, dict(self.gauge_as(3, "go"), tier="strong"), self.rows, self.industry, END.isoformat(), 5)
+        self.assertIn("把握大", strong["picks"][0]["plan"]["expected"]["text"])
+        self.assertTrue(any("入选的几只" in q["q"] for q in b["faq"]))
         self.assertIn("今天涨停或跌停", b["funnel"]["reasons"])
         self.assertIn("公司在亏损，或者没有取到市盈率", b["funnel"]["reasons"])
         light = short.select(self.stocks, self.crosses, self.gauge_as(2, "light"), self.rows, self.industry, END.isoformat(), 5)
@@ -488,24 +538,45 @@ class BoardsTest(unittest.TestCase):
 
     def test_mid_rules(self):
         reports = {c: {"yoy": 0.3, "label": "2026年三季报", "notice": "2026-10-28", "industry": self.industry[c]} for c in self.stocks}
-        reports["600801"]["yoy"] = 0.05
-        b = mid.select(self.stocks, self.crosses, self.g, self.rows, reports, self.calendar, END.isoformat(), 5, temp_of(30))
-        codes = {p["code"] for p in b["picks"]}
+        quarters = {c: {"period": "2026-09-30", "label": "2026年三季报", "notice": "2026-10-28", "sq": 1.0e8, "sq_ly": 1.0e8} for c in self.stocks}
+        quarters["600132"] = dict(quarters["600132"], sq=9.0e8)          # 冷热分不算最高，但业绩大超预期
+        quarters["600802"] = dict(quarters["600802"], sq=-2.0e8)         # 最冷的一只，但单季利润大降
+        b = mid.select(self.stocks, self.crosses, self.g, self.rows, reports, self.calendar, END.isoformat(), 5, temp_of(30), quarters)
+        codes = [p["code"] for p in b["picks"]]
         self.assertTrue(codes, b["funnel"])
-        self.assertTrue(codes <= {f"60080{i}" for i in range(6)}, "只买最冷的一成")
-        self.assertNotIn("600801", codes, "利润同比没超过 10% 的不要")
-        self.assertIn("最新财报的净利润同比没有超过 10%", b["funnel"]["reasons"])
+        cold = {c: self.cross.cold[self.cross.pos[c]] for c in codes}
+        self.assertTrue(all(v >= mid.COLD_MIN for v in cold.values()), "只买冷热分 85 以上的")
+        self.assertIn("600132", codes, "业绩超预期的排到前面")
+        self.assertNotIn("600802", codes, "单季利润大降的排到后面")
+        p = next(x for x in b["picks"] if x["code"] == "600132")
+        self.assertEqual(p["badge"], "单季利润 9.0 倍")
+        self.assertTrue(any(e["label"] == "业绩超预期" and "多赚的部分相当于流通市值" in e["detail"] for e in p["evidence"]))
+        self.assertIn("等额", b["equal"]["text"])
         self.assertIn("600900", [x["code"] for x in b["avoid"]["names"]], "最热的列在「别追」里")
-        p = b["picks"][0]
         self.assertIsNone(p["plan"]["stop_pct"], "不设价格止损")
-        self.assertIn("市场温度", p["plan"]["expected"]["text"])
-        self.assertEqual(b["timing"]["level"], "go")
+        self.assertIn("温度 <40", p["plan"]["expected"]["text"])
+        self.assertEqual((b["timing"]["tier"], b["timing"]["level"]), ("good", "go"), "温度 30、分数 1：好时候")
         self.assertTrue(b["timing"]["table"][1]["current"])
+        self.assertFalse(b["warnings"])
+        self.assertEqual(mid.timing(dict(self.g, score=3), temp_of(30))["tier"], "best")
+        self.assertEqual(mid.timing(dict(self.g, score=3), temp_of(50))["level"], "light")
         self.assertEqual(mid.timing(self.g, temp_of(85))["level"], "avoid", "很热的时候不建仓")
-        self.assertEqual(mid.timing(dict(self.g, score=-2), temp_of(30))["level"], "wait")
+        self.assertEqual(mid.timing(dict(self.g, score=-2), temp_of(50))["level"], "wait", "温度 40–80、分数不到 2：先不买")
         self.assertEqual(mid.timing(dict(self.g, score=0), None)["level"], "wait")
-        no_reports = mid.select(self.stocks, self.crosses, self.g, self.rows, {}, self.calendar, END.isoformat(), 5)
-        self.assertTrue(no_reports["warnings"])
+        no_q = mid.select(self.stocks, self.crosses, self.g, self.rows, reports, self.calendar, END.isoformat(), 5, temp_of(30))
+        self.assertTrue(no_q["picks"], "单季利润没取到也照样选，只是这两项按中间值算")
+        self.assertTrue(no_q["warnings"])
+        self.assertTrue(no_q["picks"][0]["badge"].startswith("冷热分"))
+
+    def test_mid_surprise(self):
+        self.assertEqual(mid.surprise_of({"sq": 4e8, "sq_ly": 2e8}, 2e10), (0.01, 1.0))
+        self.assertEqual(mid.surprise_of({"sq": 4e8, "sq_ly": None}, 2e10), (None, None))
+        self.assertEqual(mid.surprise_of({"sq": 1e8, "sq_ly": -1e8}, None), (None, 2.0))
+        base = {"cold": 92.0, "sq": 1e8, "sq_ly": -1e8, "sq_yoy": 2.0}
+        self.assertEqual(mid.badge_of(base), "单季扭亏")
+        self.assertEqual(mid.badge_of(dict(base, sq_ly=1e8, sq=1.3e8, sq_yoy=0.3)), "单季利润 +30%")
+        self.assertEqual(mid.badge_of(dict(base, sq=None)), "冷热分 92")
+        self.assertIn("亏得比去年少", mid.profit_story(dict(base, sq=-0.5e8, sq_ly=-1e8))["detail"])
 
     def test_mid_simulation(self):
         base = [10.0] * 20

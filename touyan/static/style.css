@@ -380,6 +380,7 @@ a.badge:hover { color: var(--text); }
 .pick-name { font-weight: 700; font-size: 16px; }
 .pick-price { font-variant-numeric: tabular-nums; }
 .pick-score { min-width: 36px; text-align: center; font-weight: 750; font-size: 18px; font-variant-numeric: tabular-nums; }
+.pick-badge { font-size: 13px; font-weight: 650; padding: 2px 8px; border-radius: 999px; background: var(--surface-3); color: var(--text); white-space: nowrap; font-variant-numeric: tabular-nums; }
 .pick-one { margin: 0; font-weight: 600; }
 .badge.sig-buy { background: color-mix(in srgb, var(--good) 16%, transparent); color: var(--good); }
 .badge.sig-watch { background: var(--warn-bg); color: var(--warn-ink); }

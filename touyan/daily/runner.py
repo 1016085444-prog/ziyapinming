@@ -190,6 +190,16 @@ def followed_outside(router, store, stocks: dict, as_of: str, partial: str | Non
     return out
 
 
+def load_quarters(cache, as_of: str, reports: dict) -> tuple[dict, list[str]]:
+    """每只股票最新一季的单季利润和去年同季（中期板块的「业绩超预期」）。取不到时中期排序不用这两项，并提示。"""
+    if not reports:
+        return {}, []
+    try:
+        return universe.quarter_profits(cache, date.fromisoformat(as_of), reports), []
+    except SourceError as exc:
+        return {}, [f"去年同期的财报摘要取不到（算不出单季利润）：{exc}"]
+
+
 def load_roes(cache, as_of: str) -> tuple[dict, list[str]]:
     """近三年年报的 ROE（长期板块用）。取不到时长期板块没法筛，名单是空的。"""
     try:
@@ -346,6 +356,8 @@ def run(router, cache, store, stock_count: int = 5, use_llm: bool = True, on_pro
     warnings += rep_warn
     roes, roe_warn = load_roes(cache, as_of)
     warnings += roe_warn
+    quarters, q_warn = load_quarters(cache, as_of, reports)
+    warnings += q_warn
     industry = {c: r["industry"] for c, r in reports.items() if r.get("industry")}
     for r in rows:
         if not r.get("industry") and r["code"] in industry:
@@ -396,12 +408,12 @@ def run(router, cache, store, stock_count: int = 5, use_llm: bool = True, on_pro
 
     b_short = guarded(short, short_board, warnings)
 
-    progress("中期", "找没人追、利润在增长的股票", 62)
+    progress("中期", "找没人追、业绩超预期的股票", 62)
 
     def mid_board():
         if not g:
             raise RuntimeError("大盘预估没有算出来")
-        return mid.select(stocks, crosses, g, rows_by_code, reports, calendar, as_of, n, temp)
+        return mid.select(stocks, crosses, g, rows_by_code, reports, calendar, as_of, n, temp, quarters)
 
     b_mid = guarded(mid, mid_board, warnings)
 

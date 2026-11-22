@@ -40,7 +40,12 @@ def shared_expected(picks: list[dict]) -> dict | None:
 
 def pick_text(i: int, p: dict, shared: bool = False) -> list[str]:
     plan = p["plan"]
-    score = f"{p['score']:.1f}{p['score_unit']}" if p.get("score_unit") else f"{p['score']:.0f} 分"
+    if p.get("badge"):
+        score = p["badge"]
+    elif p.get("score_unit"):
+        score = f"{p['score']:.1f}{p['score_unit']}"
+    else:
+        score = f"{p['score']:.0f} 分"
     head = f"### {i}. {p['name']}（{p['code']}）" + (f" · {p['industry']}" if p.get("industry") else "") + f" · {score}"
     out = ["", head, p["headline"]]
     out += [f"- {ICONS.get(e['status'], '・')} {e['label']}：{e['detail']}" for e in p["evidence"]]
@@ -93,9 +98,18 @@ def gauge_text(g: dict) -> list[str]:
     return out
 
 
-def temp_rows_text(title: str, rows: list[dict]) -> list[str]:
+def tier_rows_text(rows: list[dict]) -> list[str]:
     cell = lambda x: f"{_pct(x['mean'])} | {x['win'] * 100:.0f}%" if x else "— | —"
-    out = ["", title, "", "| 当时的市场温度 | 近十年：每笔平均 | 赚钱的比例 | 更早的十年：每笔平均 | 赚钱的比例 |", "|---|---:|---:|---:|---:|"]
+    out = ["", "出手分档（按今天的分数和市场温度）：", "",
+           "| 档位 | 条件 | 一年约几天 | 近十年：每笔平均 | 赚钱的比例 | 更早的十年：每笔平均 | 赚钱的比例 |", "|---|---|---:|---:|---:|---:|---:|"]
+    out += [f"| {r['label']}{' ← 今天' if r['current'] else ''} | {r['rule']} | {round(r['per_year']) if r.get('per_year') is not None else '—'} | {cell(r['new'])} | {cell(r['old'])} |"
+            for r in rows]
+    return out
+
+
+def temp_rows_text(title: str, rows: list[dict], head: str = "当时的市场温度") -> list[str]:
+    cell = lambda x: f"{_pct(x['mean'])} | {x['win'] * 100:.0f}%" if x else "— | —"
+    out = ["", title, "", f"| {head} | 近十年：每笔平均 | 赚钱的比例 | 更早的十年：每笔平均 | 赚钱的比例 |", "|---|---:|---:|---:|---:|"]
     out += [f"| {r['label']}{' ← 现在' if r['current'] else ''} | {cell(r['new'])} | {cell(r['old'])} |" for r in rows]
     return out
 
@@ -120,12 +134,14 @@ def board_text(b: dict) -> list[str]:
         out += ["", f"**今天的结论：{b['stance']['label']}**。{b['stance']['text']}"]
     if b.get("gauge"):
         out += gauge_text(b["gauge"])
+        if b["gauge"].get("tier_table"):
+            out += tier_rows_text(b["gauge"]["tier_table"])
         if b["gauge"].get("temp_table"):
             out += temp_rows_text("分数 ≥3 的日子出手，按当时的市场温度分开看：", b["gauge"]["temp_table"])
     if b.get("timing"):
         out += ["", f"**买入时机**：{b['timing']['text']}"]
         if b["timing"].get("table"):
-            out += temp_rows_text("按建仓时的市场温度分开看：", b["timing"]["table"])
+            out += temp_rows_text("按建仓的时机分开看：", b["timing"]["table"], "建仓的时机")
     if b.get("key") == "dca" and b.get("temp"):
         out += ["", f"**这个月**：{b['temp']['text']}"]
     out += [""] + checkup_text(b["checkup"])
@@ -138,6 +154,8 @@ def board_text(b: dict) -> list[str]:
     shared = shared_expected(b["picks"])
     if shared:
         out += ["", "**预期收益（下面这几只都一样）**：" + _expected_line(shared)]
+    if b.get("equal"):
+        out += ["", "**这几只等额买入**：" + b["equal"]["text"]]
     for i, p in enumerate(b["picks"], 1):
         out += pick_text(i, p, shared=bool(shared))
     if b.get("following"):

@@ -151,32 +151,87 @@ def stance_of(score: int) -> tuple[str, str, str]:
                             "近十年里这样的日子做短线，十年有九年是亏的。空仓。")
 
 
+TIER_LABELS = {"strong": "把握大", "normal": "一般", "light": "轻仓", "none": "不出手"}
+
+
+def tier_of(score: int, temp_value: float | None) -> str:
+    """出手分四档（实验 67，两个十年分别检验过）：
+    强 = 分数 ≥4 且温度 <60，或分数 ≥3 且温度 <40；一般 = 分数 3、温度 40–60；
+    轻仓 = 分数 ≥3、温度 60–80，或分数 2、温度 <60；其余不出手（温度 ≥80、分数 2 且温度 ≥60、分数 ≤1）。
+    没有温度时只看分数：≥4 强、3 一般、2 轻仓。"""
+    v = temp_value
+    if v is None:
+        return "strong" if score >= 4 else "normal" if score == GO else "light" if score == LIGHT else "none"
+    if v >= 80 or score < LIGHT:
+        return "none"
+    if (score >= 4 and v < 60) or (score >= GO and v < 40):
+        return "strong"
+    if score >= GO:
+        return "normal" if v < 60 else "light"
+    return "light" if v < 60 else "none"
+
+
+def _tier_stats(tier: str) -> tuple[dict, dict]:
+    t = ev.SHORT[tier]
+    return t["new"], t["old"]
+
+
 def apply_temperature(score: int, key: str, label: str, basis: str, temp: dict | None) -> tuple[str, str, str, dict | None]:
-    """用市场温度把关：很热不出手，偏热降一档，偏冷时信号更可靠。返回 (档位, 结论, 依据, 温度的影响说明)。"""
+    """用市场温度把分数落到四档里：很热不出手，偏热降一档，偏冷时信号更可靠。返回 (档位, 结论, 依据, 温度的影响说明)。
+    「档位」还是 go / light / wait / avoid 四个；具体是哪一档（强 / 一般 / 轻仓 / 不出手）见 tier_of。"""
     if not temp:
         return key, label, basis, None
     v = temp["value"]
-    by = ev.SHORT["by_temp"]
-    info = {"value": v, "label": temp["label"], "effect": "none", "text": ""}
+    tier = tier_of(score, v)
+    info = {"value": v, "label": temp["label"], "effect": "none", "text": "", "tier": tier}
     if v >= 80:
-        old = by["ge80"]["old"]
-        info.update(effect="block", text=(f"市场温度 {v:.0f}（很热）。历史上温度 80 以上的日子，就算分数 ≥3 出手，平均每笔也是 {ev.pct(old['mean'])}、"
-                                          f"只有 {ev.share(old['win'])} 赚钱（{ev.OLD['short']}，共 {old['n']} 笔）——这种时候不做短线。"))
+        new, old = _tier_stats("skip_hot80")
+        info.update(effect="block", text=(f"市场温度 {v:.0f}（很热）。历史上温度 80 以上的日子，就算分数够了出手，平均每笔也是 {ev.pct(new['mean'])}（{ev.NEW['short']}）/ "
+                                          f"{ev.pct(old['mean'])}（{ev.OLD['short']}），只有 {ev.share(new['win'])} / {ev.share(old['win'])} 赚钱——这种时候不做短线。"))
         if key in ("go", "light"):
             return "avoid", "不出手", info["text"], info
-    elif v >= 60:
-        new, old = by["ge60"]["new"], by["ge60"]["old"]
-        info.update(effect="halve", text=(f"市场温度 {v:.0f}（偏热）。历史上温度 60 以上时，分数 ≥3 的日子出手，平均每笔只有 {ev.pct(new['mean'])}（{ev.NEW['short']}）/ "
-                                          f"{ev.pct(old['mean'])}（{ev.OLD['short']}），优势小了一半多。"))
-        if key == "go":
-            return "light", "可以轻仓", f"分数 {score} 本来够出手，但{info['text']}所以只用轻仓。", info
-    elif v < 40:
-        new, old = by["lt40"]["new"], by["lt40"]["old"]
-        info.update(effect="boost", text=(f"市场温度 {v:.0f}（{temp['label']}），短线信号在这种时候最可靠：历史上温度 40 以下、分数 ≥3 的日子出手，平均每笔 "
-                                          f"{ev.pct(new['mean'])}（{ev.NEW['short']}）/ {ev.pct(old['mean'])}（{ev.OLD['short']}），{ev.share(new['win'])} 赚钱。"))
+        return key, label, basis, info
+    if v >= 60:
+        info["effect"] = "halve"
+        if score >= GO:
+            new, old = _tier_stats("light")
+            info["text"] = (f"市场温度 {v:.0f}（偏热），分数 {score} 只算轻仓：温度 60 以上时短线的优势小了一大截，两个十年还不一致。")
+            return "light", "可以轻仓", f"分数 {score} 本来够出手，但{info['text']}仓位减半。", info
+        if score == LIGHT:
+            new, old = _tier_stats("skip_s2_hot")
+            info["text"] = (f"市场温度 {v:.0f}（偏热），分数只有 2：历史上这种日子出手，平均每笔 {ev.pct(new['mean'])}（{ev.NEW['short']}）/ "
+                            f"{ev.pct(old['mean'])}（{ev.OLD['short']}），{ev.share(new['win'])} / {ev.share(old['win'])} 赚钱，扣掉风险基本没有优势。")
+            return "wait", "不出手", f"分数 2 本来可以轻仓，但{info['text']}这种日子不出手。", info
+        info["text"] = f"市场温度 {v:.0f}（偏热）。分数不够，本来就不出手。"
+        return key, label, basis, info
+    if tier == "strong":
+        new, old = _tier_stats("strong")
+        info.update(effect="boost", text=(f"分数 {score}、市场温度 {v:.0f}（{temp['label']}）：是「把握大」的出手日——历史上这种日子按规则买入，每笔平均 "
+                                          f"{ev.pct(new['mean'])}（{ev.NEW['short']}）/ {ev.pct(old['mean'])}（{ev.OLD['short']}），{ev.share(new['win'])} / {ev.share(old['win'])} 赚钱，"
+                                          f"两个十年都没有一年是亏的。这样的日子一年大约 {ev.SHORT['days_per_year']['strong']['new']:.0f} 天。"))
+        return "go", "可以出手（把握大）", info["text"], info
+    if v < 40:
+        info.update(effect="boost", text=f"市场温度 {v:.0f}（{temp['label']}），短线信号在市场冷的时候更可靠。")
     else:
         info["text"] = f"市场温度 {v:.0f}（不冷不热），对短线没有额外的加减。"
     return key, label, basis, info
+
+
+def tier_table(score: int, temp: dict | None) -> list[dict]:
+    """四档出手日（加上两种「不出手」）各自的历史结果，标出今天在哪一行。"""
+    v = temp["value"] if temp else None
+    cur = tier_of(score, v)
+    if cur == "none" and v is not None and score >= LIGHT:
+        cur = "skip_hot80" if v >= 80 else "skip_s2_hot"
+    rows = []
+    for k, rule in (("strong", "分数 ≥4 且温度 <60，或分数 ≥3 且温度 <40"), ("normal", "分数 3，温度 40–60"),
+                    ("light", "分数 ≥3、温度 60–80，或分数 2、温度 <60"), ("skip_s2_hot", "分数 2，温度 ≥60"), ("skip_hot80", "分数 ≥2，温度 ≥80")):
+        new, old = ev.SHORT[k]["new"], ev.SHORT[k]["old"]
+        rows.append({"key": k, "label": TIER_LABELS.get(k, "不出手"), "rule": rule, "current": k == cur,
+                     "per_year": ev.SHORT["days_per_year"].get(k, {}).get("new"),
+                     "new": {"n": new["n"], "mean": new["mean"], "win": new["win"]} if new else None,
+                     "old": {"n": old["n"], "mean": old["mean"], "win": old["win"]} if old else None})
+    return rows
 
 
 def temp_table(temp: dict | None) -> list[dict]:
@@ -309,12 +364,15 @@ def compute(stocks: dict[str, Stock], calendar: list[int], industry: dict[str, s
     score = total(parts)
     key, label, basis = stance_of(score)
     key, label, basis, temp_info = apply_temperature(score, key, label, basis, temp)
+    tier = tier_of(score, temp["value"] if temp else None)
+    if key not in ("go", "light"):
+        tier = "none"
     hist = history(tb)
     wait = td.trading_days_until_month_window(today)
     return {
-        "score": score, "stance": key, "label": label, "basis": basis, "parts": parts,
+        "score": score, "stance": key, "tier": tier, "tier_label": TIER_LABELS[tier], "label": label, "basis": basis, "parts": parts,
         "facts": {**m, "next_day": nxt.isoformat(), "next_weekday": WEEKDAYS[nxt.weekday()], "window": window},
-        "table": evidence_table(score), "temp": temp_info, "temp_table": temp_table(temp),
+        "table": evidence_table(score), "temp": temp_info, "temp_table": temp_table(temp), "tier_table": tier_table(score, temp),
         "recent": recent_check(hist), "scores": recent_scores(tb),
         "style": style(tb, j, m, nxt),
         "hot_sectors": hot_sectors(stocks, industry or {}),

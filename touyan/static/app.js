@@ -1415,8 +1415,9 @@
           h('span', { class: 'small muted' }, ' ' + pick.code + (pick.industry ? ' · ' + pick.industry : ''))),
         h('span', { class: 'spacer' }),
         pick.price ? h('span', { class: 'pick-price' }, F.num(pick.price, digits)) : null,
-        h('span', { class: 'pick-score', title: pick.score_unit ? '股息率' : '这个板块内部的排序分，不同板块之间不能比' },
-          pick.score_unit ? Number(pick.score).toFixed(1) + pick.score_unit : Number(pick.score).toFixed(0))),
+        pick.badge ? h('span', { class: 'pick-badge', title: pick.badge_title || '' }, pick.badge)
+          : h('span', { class: 'pick-score', title: pick.score_unit ? '股息率' : '这个板块内部的排序分，不同板块之间不能比' },
+            pick.score_unit ? Number(pick.score).toFixed(1) + pick.score_unit : Number(pick.score).toFixed(0))),
       h('p', { class: 'pick-one' }, pick.headline),
       sp || (pick.meters && pick.meters.length) ? h('div', { class: 'pick-viz' },
         sp ? h('div', null, sp, h('div', { class: 'small muted' }, '近 ' + pick.spark.closes.length + ' 个交易日')) : null,
@@ -1444,20 +1445,43 @@
     return h('ul', null, reasons.map(function (k) { return h('li', null, k + '：' + funnel.reasons[k] + ' 只'); }));
   }
 
-  function pickList(picks, funnel, emptyText) {
+  /* 入选名次和之后的收益：说明「排第几没有区别，等额买」 */
+  function equalBox(eq) {
+    if (!eq || !eq.rank) return null;
+    var nr = eq.rank['new'] || [], or_ = eq.rank.old || [];
+    var n = Math.min(nr.length, or_.length, 10);
+    return h('div', { class: 'stance st-light' }, h('strong', null, '这几只等额买入，不分高低'),
+      h('div', { class: 'small' }, eq.text),
+      n ? V.columns({ title: '入选名次和之后的收益', sub: '历史上每个名次的平均每笔收益：看不出「排得越前越好」', catLabel: '名次',
+        categories: nr.slice(0, n).map(function (r) { return '第 ' + r.rank + ' 名'; }),
+        series: [{ name: '近十年', values: nr.slice(0, n).map(function (r) { return r.mean; }) }, { name: '更早的十年', values: or_.slice(0, n).map(function (r) { return r.mean; }) }],
+        fmt: V.pct(1), height: 160 }) : null);
+  }
+
+  function timingChart(rows) {
+    if (!rows || !rows.length) return null;
+    var cur = rows.findIndex(function (r) { return r.current; });
+    return V.columns({ title: '建仓时机和之后的结果', sub: '每笔平均收益', catLabel: '时机',
+      categories: rows.map(function (r) { return r.label.replace(/（.*$/, ''); }),
+      series: [{ name: '近十年', values: rows.map(function (r) { return r['new'] ? r['new'].mean : null; }) }, { name: '更早的十年', values: rows.map(function (r) { return r.old ? r.old.mean : null; }) }],
+      fmt: V.pct(1), height: 170, highlight: cur >= 0 ? cur : undefined, table: false });
+  }
+
+  function pickList(picks, funnel, emptyText, eq) {
     var shared = sharedExpected(picks);
     if (picks.length) return [shared ? h('div', { class: 'stance st-light' }, h('strong', null, '预期收益（下面这几只都一样）'),
-      h('div', null, shared.reliable === false && shared.available ? h('span', { class: 'bad-mark' }, '这个方法没通过历史检验，数字仅供参考。') : null, shared.text)) : null]
+      h('div', null, shared.reliable === false && shared.available ? h('span', { class: 'bad-mark' }, '这个方法没通过历史检验，数字仅供参考。') : null, shared.text)) : null,
+      equalBox(eq)]
       .concat(picks.map(function (x, i) { return pickCard(x, i + 1, !!shared); }));
     return h('div', { class: 'empty' }, emptyText, funnel ? h('div', { class: 'small', style: { marginTop: '8px', textAlign: 'left' } }, reasonList(funnel)) : null);
   }
 
-  function tempRowsTable(rows) {
+  function tempRowsTable(rows, head) {
     var cell = function (x) { return x ? [h('td', { class: 'n ' + F.cls(x.mean) }, F.pct(x.mean, 1)), h('td', { class: 'n' }, Math.round(x.win * 100) + '%')] : [h('td', { class: 'n' }, '—'), h('td', { class: 'n' }, '—')]; };
     return h('div', { class: 'table-wrap' }, h('table', { class: 'tbl' },
       h('thead', null,
         h('tr', { class: 'th-group' }, h('th', null, ''), h('th', { class: 'n', colspan: '2' }, '近十年'), h('th', { class: 'n', colspan: '2' }, '更早的十年')),
-        h('tr', null, h('th', null, '当时的市场温度'), ['每笔平均', '赚钱的比例', '每笔平均', '赚钱的比例'].map(function (x) { return h('th', { class: 'n' }, x); }))),
+        h('tr', null, h('th', null, head || '当时的市场温度'), ['每笔平均', '赚钱的比例', '每笔平均', '赚钱的比例'].map(function (x) { return h('th', { class: 'n' }, x); }))),
       h('tbody', null, rows.map(function (r) {
         return h('tr', { class: r.current ? 'hl' : '' }, h('td', null, r.label + (r.current ? '（现在）' : '')), cell(r['new']), cell(r.old));
       }))));
@@ -1472,7 +1496,7 @@
       checkupBox(b.checkup, b.key));
     var funnelText = b.key === 'dca' ? '候选 ' + f.pool + ' 只指数基金 → 有足够历史的 ' + f.candidates + ' → 入选 ' + f.picked
       : b.key === 'long' ? '股票池 ' + f.pool + ' 只 → 赚钱 ' + steps.profit + ' → 分红 ' + steps.dividend + ' → ROE 稳 ' + steps.roe + ' → 利润没大降 ' + steps.growth + ' → 不热 ' + steps.calm + ' → 行业不弱 ' + f.candidates + ' → 入选 ' + f.picked
-        : b.key === 'mid' ? '股票池 ' + f.pool + ' 只 → 最冷的一成 ' + f.cold + ' → 市值、盈利、增长都过关 ' + f.candidates + ' → 入选 ' + f.picked
+        : b.key === 'mid' ? '股票池 ' + f.pool + ' 只 → 冷热分 85 以上 ' + f.cold + ' → 不是大盘股、在赚钱 ' + f.candidates + ' → 按超预期等五项排序，入选 ' + f.picked
           : '股票池 ' + f.pool + ' 只 → 符合选股条件 ' + f.candidates + ' → 入选 ' + f.picked;
     var holding = b.key === 'short' && b.stance && (b.stance.key === 'wait' || b.stance.key === 'avoid');
     var stanceBox = b.key === 'long' && b.stance ? h('div', { class: 'stance ' + (STANCE_CLS[b.stance.key] || '') }, h('strong', null, '现在：' + b.stance.label), h('div', null, b.stance.text)) : null;
@@ -1485,15 +1509,36 @@
         stanceBox,
         b.key === 'dca' && b.temp ? h('div', { class: 'stance st-light' }, h('strong', null, '这个月'), h('div', null, b.temp.text)) : null,
         b.timing ? h('div', { class: 'stance ' + STANCE_CLS[b.timing.level] }, h('strong', null, '买入时机'), h('div', null, b.timing.text),
-          b.timing.table ? h('details', { class: 'small t2' }, h('summary', null, '按建仓时的市场温度分开看'), tempRowsTable(b.timing.table)) : null) : null,
+          b.timing.table ? h('details', { class: 'small t2' }, h('summary', null, '按建仓的时机分开看（市场温度 × 大盘预估分）'),
+            tempRowsTable(b.timing.table, '建仓的时机'), timingChart(b.timing.table)) : null) : null,
         b.note ? h('p', { class: 'small muted', style: { marginTop: 0 } }, b.note) : null,
-        pickList(b.picks, f, '今天没有符合条件的，宁缺毋滥。没入选的原因：'),
+        pickList(b.picks, f, '今天没有符合条件的，宁缺毋滥。没入选的原因：', b.equal),
         b.picks.length && reasonList(f) ? h('details', { class: 'small muted', style: { marginTop: '10px' } },
           h('summary', null, '其余的为什么没入选'), reasonList(f)) : null);
     return [method, b.gauge ? gaugeCard(b.gauge) : null, picks, b.following ? followingCard(b.following, b.key) : null,
       b.etfs ? etfIdeas(b.etfs) : null, b.avoid ? avoidCard(b.avoid) : null,
       b.industry ? industryCard(b.industry) : null, b.funds && b.funds.picks && b.funds.picks.length ? indexFundsCard(b.funds) : null,
       b.ranking ? dcaRanking(b.ranking) : null, b.faq ? faqCard(b.faq) : null];
+  }
+
+  /* 出手分档：分数 × 市场温度，各档的历史结果 */
+  function tierBox(g) {
+    var rows = g.tier_table;
+    var cur = rows.findIndex(function (r) { return r.current; });
+    var cell = function (x) { return x ? [h('td', { class: 'n ' + F.cls(x.mean) }, F.pct(x.mean, 1)), h('td', { class: 'n' }, Math.round(x.win * 100) + '%')] : [h('td', { class: 'n' }, '—'), h('td', { class: 'n' }, '—')]; };
+    return h('div', null, h('h3', { class: 'sub-h' }, '出手分档：分数 × 市场温度'),
+      h('p', { class: 'small', style: { margin: '0 0 6px' } }, '同样的分数，市场冷的时候更可靠，偏热的时候优势小、两个十年还不一致，很热的时候是亏的。所以出手前再按市场温度分一次档，今天在高亮的那一行。'),
+      h('div', { class: 'table-wrap' }, h('table', { class: 'tbl' },
+        h('thead', null,
+          h('tr', { class: 'th-group' }, h('th', null, ''), h('th', null, ''), h('th', null, ''), h('th', { class: 'n', colspan: '2' }, '近十年'), h('th', { class: 'n', colspan: '2' }, '更早的十年')),
+          h('tr', null, h('th', null, '档位'), h('th', null, '条件'), h('th', { class: 'n' }, '一年约几天'), ['每笔平均', '赚钱的比例', '每笔平均', '赚钱的比例'].map(function (x) { return h('th', { class: 'n' }, x); }))),
+        h('tbody', null, rows.map(function (r) {
+          return h('tr', { class: r.current ? 'hl' : '' }, h('td', null, r.label + (r.current ? '（今天）' : '')), h('td', null, r.rule),
+            h('td', { class: 'n' }, r.per_year === null || r.per_year === undefined ? '—' : String(Math.round(r.per_year))), cell(r['new']), cell(r.old));
+        })))),
+      V.columns({ title: '各档出手日，按规则买入的每笔平均', categories: rows.map(function (r) { return r.label + (r.key.indexOf('skip') === 0 ? '·' + r.rule.replace(/^分数 [^，]+，/, '') : ''); }),
+        series: [{ name: '近十年', values: rows.map(function (r) { return r['new'] ? r['new'].mean : null; }) }, { name: '更早的十年', values: rows.map(function (r) { return r.old ? r.old.mean : null; }) }],
+        fmt: V.pct(1), highlight: cur >= 0 ? cur : undefined, height: 170, table: false }));
   }
 
   // 大盘预估：先判断大盘，再看风格和板块
@@ -1531,7 +1576,7 @@
       h('div', { class: 'stance ' + (STANCE_CLS[g.stance] || '') },
         h('div', { class: 'gauge-score' }, h('span', { class: 'gs-num' }, scoreText(g.score)), h('span', { class: 'gs-label' }, g.label)),
         h('div', null, g.basis),
-        g.temp && g.temp.text && g.temp.effect !== 'block' && g.temp.effect !== 'halve' ? h('div', { class: 'small t2' }, g.temp.text) : null),
+        g.temp && g.temp.text && g.temp.effect !== 'block' && g.temp.effect !== 'halve' && g.temp.text !== g.basis ? h('div', { class: 'small t2' }, g.temp.text) : null),
       h('div', { class: 'sector-row' }, h('span', { class: 'small muted' }, '今天的加减分'), chips),
       h('div', { class: 'small muted', style: { marginTop: '6px' } }, '今天：全市场 ' + fct.pool + ' 只活跃股票平均 ' + F.pct(fct.change, 1) + '，' + fct.limit_up + ' 只涨停、' + fct.limit_down + ' 只跌停，' +
         (fct.amount_ratio ? '成交额是近 20 日均值的 ' + fct.amount_ratio.toFixed(2) + ' 倍' : '成交额对比不出来') + '；近 5 天平均 ' + F.pct(fct.change5, 1) + '；明天是' + fct.next_weekday + '。'),
@@ -1550,8 +1595,8 @@
         series: [{ name: '近十年', values: g.table.map(function (r) { return r['new'].after; }) }, { name: '更早的十年', values: g.table.map(function (r) { return r.old.after; }) }],
         fmt: V.pct(2), highlight: cur, height: 180, table: false }),
       recent,
-      g.temp_table ? h('div', null, h('h3', { class: 'sub-h' }, '市场温度把关'),
-        h('p', { class: 'small', style: { margin: '0 0 6px' } }, g.temp && g.temp.text ? g.temp.text : '分数 ≥3 的日子出手，按当时的市场温度分开看：'),
+      g.tier_table ? tierBox(g) : null,
+      g.temp_table ? h('details', { class: 'small t2' }, h('summary', null, '分数 ≥3 的日子，按当时的市场温度分开看'),
         tempRowsTable(g.temp_table)) : null,
       st ? h('div', { class: 'step-box' }, h('strong', null, '第二步 风格：' + st.label), h('div', { class: 'small' }, st.notes.join('；') + '。' + st.advice + '。'),
         h('div', { class: 'small muted' }, st.evidence)) : null,

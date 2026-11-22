@@ -99,6 +99,12 @@ def fake_fund_rank(cache, ft):
             for i, name in enumerate(names)]
 
 
+def fake_quarters(cache, today, latest):
+    """单季利润：一半的股票最新一季比去年同季多赚，另一半少赚。"""
+    return {c: {"period": r.get("period") or "2026-09-30", "label": r.get("label") or "2026年三季报", "notice": r.get("notice") or "2026-10-28",
+                "sq": 1.5e8 if int(c) % 2 else 0.8e8, "sq_ly": 1.0e8} for c, r in latest.items()}
+
+
 @contextlib.contextmanager
 def offline(now=CLOSE_TIME, kline=fake_kline):
     """整次运行要用到的外部数据，全部换成替身。"""
@@ -106,6 +112,8 @@ def offline(now=CLOSE_TIME, kline=fake_kline):
         stack.enter_context(mock.patch.object(R.universe, "a_share_snapshot", return_value=([dict(r) for r in ROWS], "测试快照", [])))
         stack.enter_context(mock.patch.object(R.universe, "latest_reports", side_effect=fake_reports))
         stack.enter_context(mock.patch.object(R.universe, "annual_roes", side_effect=fake_roes))
+        stack.enter_context(mock.patch.object(R.universe, "quarter_profits", side_effect=fake_quarters))
+        stack.enter_context(mock.patch.object(R.universe, "report_period", side_effect=AssertionError("测试里不该联网取财报")))
         stack.enter_context(mock.patch.object(R.universe, "fund_rank", side_effect=fake_fund_rank))
         stack.enter_context(mock.patch.object(R.tencent, "kline_true_ex", side_effect=kline))
         stack.enter_context(mock.patch.object(R.temperature, "MIN_STOCKS", 50))
@@ -154,6 +162,12 @@ class RunnerTest(unittest.TestCase):
         self.assertIn("gauge", boards["short"])
         self.assertIn(boards["short"]["stance"]["key"], ("go", "light", "wait", "avoid"))
         self.assertIn("timing", boards["mid"])
+        mid_board = boards["mid"]
+        self.assertTrue(mid_board["picks"], mid_board["funnel"])
+        self.assertTrue(all(p.get("badge") for p in mid_board["picks"]), "中期卡片显示入选理由，不显示排序分")
+        self.assertFalse([w for w in payload["warnings"] if "单季利润" in w or "去年同期" in w])
+        self.assertIn("tier", boards["short"]["gauge"])
+        self.assertTrue(boards["short"]["gauge"]["tier_table"])
         long_board = boards["long"]
         self.assertTrue(long_board["picks"], long_board["funnel"])
         self.assertIn(long_board["stance"]["key"], ("buy", "hold", "pause", "sell"))
@@ -268,6 +282,23 @@ class RunnerTest(unittest.TestCase):
         self.assertTrue(any("指数基金部分生成失败" in w for w in payload["warnings"]))
         self.assertGreater(len(payload["boards"]["dca"]["ranking"]), 0, "其他板块不受影响")
         self.assertIn("## 短期", T.to_markdown(payload))
+
+    def test_quarter_failure_is_a_warning(self):
+        payload, _ = self.run_once_with(quarter_error=True)
+        self.assertTrue(any("去年同期的财报摘要取不到" in w for w in payload["warnings"]))
+        mid_board = payload["boards"]["mid"]
+        self.assertTrue(mid_board["picks"], "取不到单季利润也照样选")
+        self.assertTrue(any("单季利润没取到" in w for w in payload["warnings"]), "板块自己的提示也汇总到页面底部")
+
+    def run_once_with(self, quarter_error=False):
+        events = []
+        with offline(CLOSE_TIME, fake_kline):
+            if quarter_error:
+                with mock.patch.object(R.universe, "quarter_profits", side_effect=R.SourceError("限流")):
+                    payload = R.run(self.router, self.cache, self.store, on_progress=lambda **e: events.append(e), pool_path=None)
+            else:
+                payload = R.run(self.router, self.cache, self.store, on_progress=lambda **e: events.append(e), pool_path=None)
+        return payload, events
 
     def test_temperature_failure_is_a_warning(self):
         with mock.patch.object(R.temperature, "compute", side_effect=ValueError("历史文件坏了")), \

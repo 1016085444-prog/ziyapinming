@@ -2,18 +2,21 @@
 
 对手盘：追热点的人。A 股里被追捧的股票——换手突然放大、盘中一路被买上去、越涨越放量、天天收在最高位——
 之后是跑输的：在 2005–2026 的二十二年里，「最热的一成」没有一年跑赢过同期随便买，60 天平均少赚 2%–3%。
-反过来，没人理的股票是偏便宜的。这个板块就买「最冷的一成」，并且要求：
+反过来，没人理的股票是偏便宜的。这个板块买「最冷的一成半」（冷热分 ≥85），并且要求：
 - 不是大盘股（这个规律在市值最大的三成里基本不成立，机构定价更充分）；
-- 公司在赚钱，而且最新一期财报的净利润同比增长超过 10%（冷是因为没人看，不是因为业绩在变坏）。
+- 公司在赚钱。
+候选里按五项名次的平均排序（第二轮检验，research/exp63–67）：
+- 业绩超预期：最新一个季度的归母净利润比去年同季多出的部分 ÷ 流通市值——没人注意的好消息；
+- 单季利润同比；成交额小（越没人关注越好）；近 20 天没有涨停；冷热分。
+入选的几只不分高低：历史上排第 1 的并不比排第 5 的好，所以页面上不给它们打排序分，等额买入。
 
-怎么量「冷热」见 features.py。卖出规则是按两个十年的行情比出来的（research/exp50–52）：
-- 变热了再卖：冷热分掉到 30 以下（开始有人追了）就卖，没变热就一直拿，最多拿 120 个交易日（约半年）。
-  比「拿满 60 天就卖」每笔多赚一截，胜率从五成出头提到六成——冷门股被重新注意到需要时间，过早卖掉等于白等。
-- 收盘涨停的，第二天开盘卖（涨停股次日平均高开 2%，之后往回走）。
-- 不设价格止损：加 12% 止损，平均收益掉一大半——冷门股常常先再跌一段才涨，止损正好卖在低点。风险靠分散控制。
+卖出规则（research/exp50–52）：
+- 变热了再卖：冷热分掉到 30 以下（开始有人追了）就卖，没变热就一直拿，最多拿 120 个交易日（约半年）；
+- 收盘涨停的，第二天开盘卖（涨停股次日平均高开 2%，之后往回走）；
+- 不设价格止损：加 12% 止损，平均收益掉一大截——冷门股常常先再跌一段才涨，止损正好卖在低点。风险靠分散控制。
 
-买入时机看市场温度（temperature.py）：温度 40 以下时买入的，两个十年里平均都在 +7% 以上；80 以上买入的是亏的。
-老实话也要说清楚：入选的股票大多在阴跌、缩量，看上去并不讨喜；单只仍有四成会亏，必须分散，至少 5 只。
+建仓时机比选哪只更要紧：市场温度 40 以下随时可以买（碰上大盘预估分 ≥2 的日子最好）；40–80 之间只在分数 ≥2 的日子买；
+80 以上不买。老实话也要说清楚：入选的股票大多在阴跌、缩量，看上去并不讨喜；单只仍有三成多会亏，必须分散，至少 5 只。
 """
 
 from __future__ import annotations
@@ -30,23 +33,23 @@ from .sim import COST
 KEY, TITLE, NAME = "mid", "中期", "冷门蓄势"
 HORIZON = "1–6 个月"
 HOLD, MAX_GAP = 120, 0.03
-COLD_MIN = 90              # 冷热分：最冷的一成
+COLD_MIN = 85              # 冷热分：最冷的一成半
 EXIT_COLD = 30             # 冷热分掉到这以下算「变热了」，卖
 SIZE_MAX = 70              # 流通市值不在最大的三成里
-MIN_GROWTH = 0.10
+AMT_DAYS, UP_DAYS = 60, 20
 STEP = 10                  # 回看时每隔 10 个交易日取一天
 CHECK_EVERY = 5            # 回看时每 5 个交易日检查一次冷热分（每天都算太慢，和「每周看一次」也更接近）
 
-IDEA = ("买没人追的股票，等它被重新注意到。被追捧的股票（放量、盘中拉升、越涨越放量、天天收在高位）之后是跑输的——"
-        "二十二年里最热的一成没有一年跑赢过随便买；最冷的一成、公司又在赚钱并且利润在增长的，之后几个月平均跑赢。"
-        "买了就拿着，直到它变热（有人开始追了）再卖。")
+IDEA = ("买没人追、业绩却在变好的股票，等它被重新注意到。被追捧的股票（放量、盘中拉升、越涨越放量、天天收在高位）之后是跑输的——"
+        "二十二年里最热的一成没有一年跑赢过随便买；最冷的那批里，最新一季利润比去年同季多赚得多（超预期）的，之后几个月平均跑赢。"
+        "什么时候买比买哪只更要紧：市场冷、又碰上大跌的日子买入最好。买了就拿着，直到它变热（有人开始追了）再卖。")
 HOW = [
-    "冷热分在最冷的一成：近 60 天盘中没被拉升、近 20 天成交没放大、不是越涨越放量、不是天天收在高位（四项在全市场里排名次）",
-    "流通市值不在全市场最大的三成里（这个规律在大盘股里基本不成立）",
-    "公司在赚钱，最新一期财报的净利润同比增长超过 10%",
-    "今天没有涨停或跌停；同一个行业大类最多选两只",
+    "冷热分 85 以上（全市场最没人追的一成半）：近 60 天盘中没被拉升、近 20 天成交没放大、不是越涨越放量、不是天天收在高位",
+    "流通市值不在全市场最大的三成里（这个规律在大盘股里基本不成立）；公司在赚钱；今天没有涨停或跌停",
+    "按五项排序：业绩超预期（最新单季利润比去年同季多出的部分，按流通市值折算）、单季利润同比、成交额小、近 20 天没涨停、冷热分；同一行业大类最多两只",
+    "入选的几只不分高低，等额买入（历史上排第 1 的并不比排第 5 的好）",
+    "什么时候买：市场温度 40 以下随时可以买，碰上大盘预估分 ≥2 的日子最好；温度 40–80 只在分数 ≥2 的日子买；80 以上不买",
     "第二天开盘买（高开 3% 以上放弃）；冷热分掉到 30 以下（变热了）就卖，收盘涨停的第二天开盘卖，最多拿 120 个交易日；不设价格止损",
-    "买入时机看市场温度：40 以下最好，80 以上不买",
 ]
 _s12 = ev.MID["stop12"]
 STOP_NOTE = (f"不设价格止损。检验过：加 12% 的止损，平均每笔从 {ev.pct(ev.MID['all']['new']['mean'])} 掉到 {ev.pct(_s12['new']['mean'])}（{ev.NEW['short']}）、"
@@ -59,8 +62,27 @@ def size_ranks(stocks: dict[str, Stock], cross: Cross) -> list[float]:
     return pct_rank([stocks[c].float_mv for c in cross.codes])
 
 
-def candidates(stocks: dict[str, Stock], cross: Cross, rows: dict[str, dict], reports: dict[str, dict]) -> tuple[list[dict], dict]:
-    """今天符合条件的，从最冷的排起。reports 为空（财报摘要没取到）时不检查利润增长。"""
+def _amount(s: Stock, t: int, k: int = AMT_DAYS) -> float | None:
+    a = [x for x in s.a[max(0, t - k + 1):t + 1] if x > 0]
+    return sum(a) / len(a) if len(a) >= k * 2 // 3 else None
+
+
+def _ups(s: Stock, t: int, k: int = UP_DAYS) -> int:
+    return sum(1 for j in range(max(1, t - k + 1), t + 1) if s.limit_up(j))
+
+
+def surprise_of(q: dict | None, float_mv: float | None) -> tuple[float | None, float | None]:
+    """(超预期 = 单季利润比去年同季多出的部分 ÷ 流通市值, 单季利润同比)。缺数据的给 None。"""
+    if not q or q.get("sq") is None or q.get("sq_ly") is None:
+        return None, None
+    diff = q["sq"] - q["sq_ly"]
+    return (diff / float_mv if float_mv else None), (diff / abs(q["sq_ly"]) if q["sq_ly"] else None)
+
+
+def candidates(stocks: dict[str, Stock], cross: Cross, rows: dict[str, dict], reports: dict[str, dict],
+               quarters: dict[str, dict] | None = None) -> tuple[list[dict], dict]:
+    """今天符合条件的，按五项名次的平均从高到低（排序只决定选哪几只，入选的几只不分高低）。
+    quarters（单季利润）没取到时，「超预期」「单季同比」两项都按中间值算。"""
     size = size_ranks(stocks, cross) if len(cross) else []
     out, reasons = [], {}
 
@@ -73,26 +95,32 @@ def candidates(stocks: dict[str, Stock], cross: Cross, rows: dict[str, dict], re
             continue
         row = rows.get(code) or {}
         rep = reports.get(code) or {}
-        growth = rep.get("yoy")
         ind = rep.get("industry") or row.get("industry") or ""
         if size[i] >= SIZE_MAX:
             miss("市值在全市场最大的三成里（这个方法在大盘股里不成立）")
         elif not (row.get("pe") and row["pe"] > 0):
             miss("公司在亏损，或者没有取到市盈率")
-        elif reports and growth is None:
-            miss("没有取到最新财报的利润同比")
-        elif reports and growth <= MIN_GROWTH:
-            miss("最新财报的净利润同比没有超过 10%")
         elif s.limit_up(t) or s.limit_down(t):
             miss("今天涨停或跌停")
         else:
+            q = (quarters or {}).get(code) or {}
+            surprise, sq_yoy = surprise_of(q, s.float_mv)
             out.append({"code": code, "name": row.get("name") or s.name, "industry": ind, "bucket": bucket_of(ind, s.name),
-                        "cold": cross.cold[i], "size": size[i], "growth": growth, "report": rep.get("label", ""),
+                        "cold": cross.cold[i], "size": size[i], "growth": rep.get("yoy"), "report": rep.get("label", ""),
                         "notice": rep.get("notice", ""), "pe": row.get("pe"), "float_mv": s.float_mv,
+                        "surprise": surprise, "sq_yoy": sq_yoy, "sq": q.get("sq"), "sq_ly": q.get("sq_ly"),
+                        "q_label": q.get("label", ""), "q_notice": q.get("notice", ""),
+                        "amount": _amount(s, t), "ups20": _ups(s, t),
                         "id60": cross.col["id60"][i], "vabn": cross.col["vabn"][i], "pvv": cross.col["pvv"][i],
                         "clv": cross.col["clv"][i], "r20": cross.col["r20"][i], "hi": cross.col["hi"][i],
                         "r60": s.c[t] / s.c[t - 60] - 1})
-    out.sort(key=lambda c: -c["cold"])
+    if out:
+        parts = (pct_rank([c["surprise"] for c in out]), pct_rank([c["sq_yoy"] for c in out]),
+                 pct_rank([c["amount"] for c in out], higher_better=False), pct_rank([float(c["ups20"]) for c in out], higher_better=False),
+                 pct_rank([c["cold"] for c in out]))
+        for k, c in enumerate(out):
+            c["score"] = sum(p[k] for p in parts) / len(parts)
+    out.sort(key=lambda c: -c["score"])
     return out, reasons
 
 
@@ -103,22 +131,43 @@ def temp_tier(temp: dict | None) -> str | None:
     return "lt20" if v < 20 else "20to40" if v < 40 else "40to60" if v < 60 else "60to80" if v < 80 else "ge80"
 
 
-def expected(temp: dict | None) -> dict:
+TIMING = {   # 建仓时机分五档：(条件, 页面上的说法, 档位)
+    "best": ("温度 <40，大盘预估分 ≥2", "最好", "go"),
+    "good": ("温度 <40，分数 <2", "好", "go"),
+    "ok": ("温度 40–80，分数 ≥2", "可以买，仓位小一点", "light"),
+    "wait": ("温度 40–80，分数 <2", "先不买", "wait"),
+    "avoid": ("温度 ≥80", "不买", "avoid"),
+}
+
+
+def timing_tier(score: int, temp: dict | None) -> str | None:
+    """建仓时机落在哪一档（实验 67）。没有温度时返回 None。"""
+    if not temp:
+        return None
+    v = temp["value"]
+    if v >= 80:
+        return "avoid"
+    if v < 40:
+        return "best" if score >= gg.LIGHT else "good"
+    return "ok" if score >= gg.LIGHT else "wait"
+
+
+def expected(temp: dict | None, score: int | None = None) -> dict:
     new, old = ev.MID["all"]["new"], ev.MID["all"]["old"]
-    text = (f"历史上按这个规则买卖（{ev.NEW['short']} {new['n']} 笔，平均拿 {new['days']:.0f} 个交易日）：{new['win'] * 100:.0f}% 赚钱，"
+    text = (f"历史上按这个规则买卖（只在时机合适的日子建仓；{ev.NEW['short']} {new['n']} 笔，平均拿 {new['days']:.0f} 个交易日）：{new['win'] * 100:.0f}% 赚钱，"
             f"平均每笔 {ev.pct(new['mean'])}，中位 {ev.pct(new['median'])}；赚的平均 {ev.pct(new['avg_win'], 0)}，亏的平均 {ev.pct(new['avg_loss'], 0)}；"
             f"同期随便买是 {ev.pct(new['base'])}。{ev.OLD['short']}：{old['win'] * 100:.0f}% 赚钱，平均 {ev.pct(old['mean'])}。")
     use = new
-    tier = temp_tier(temp)
+    tier = timing_tier(score if score is not None else 0, temp)
     if tier:
-        tn, to = ev.MID["by_temp"][tier]["new"], ev.MID["by_temp"][tier]["old"]
-        label = dict(ev.MID_TEMP_ROWS)[tier]
-        text += (f"今天的市场温度是 {temp['value']:.0f}：历史上在温度 {label} 的时候买入，"
+        tn, to = ev.MID["tiers"][tier]["new"], ev.MID["tiers"][tier]["old"]
+        cond = TIMING[tier][0]
+        text += (f"今天是「{cond}」：历史上这种日子建仓，"
                  + "；".join(f"{w['short']}平均 {ev.pct(x['mean'])}、{x['win'] * 100:.0f}% 赚钱" for w, x in ((ev.NEW, tn), (ev.OLD, to)) if x) + "。")
         use = tn or to or new
-    text += f"亏钱的年份：{ev.years(new['bad_years'])}——大盘不好的年份它也会亏，只是亏得比随便买少。"
+    text += f"亏钱的年份：{ev.years(new['bad_years'])}（{ev.NEW['short']}）——大盘不好的年份它也会亏。"
     return {"available": True, "kind": "trade", "reliable": True, "n": use["n"], "win_rate": use["win"], "median": use["median"],
-            "mean": use["mean"], "avg_days": use["days"], "text": text}
+            "mean": use["mean"], "avg_days": use["days"], "tier": tier, "text": text}
 
 
 def cold_story(c: dict) -> list[dict]:
@@ -135,26 +184,65 @@ def cold_story(c: dict) -> list[dict]:
     ]
 
 
-def build_pick(s: Stock, c: dict, temp: dict | None, as_of: str) -> dict:
+def _yi(x: float) -> str:
+    return f"{x / 1e8:.2f} 亿"
+
+
+def profit_story(c: dict) -> dict:
+    """最新一季的利润和去年同季，说成一句话。"""
+    sq, ly = c.get("sq"), c.get("sq_ly")
+    if sq is None or ly is None:
+        return {"label": "单季利润", "status": "warn", "detail": "单季利润没取到，没法看是不是超预期；排序时这一项按中间值算"}
+    head = f"{c.get('q_label') or '最新一季'}单季归母净利润 {_yi(sq)}，去年同季 {_yi(ly)}"
+    if ly < 0 < sq:
+        tail = "：扭亏为盈"
+    elif sq < 0 and ly < 0:
+        tail = "：还在亏，但亏得比去年少" if sq > ly else "：亏得比去年多"
+    else:
+        tail = f"，同比 {c['sq_yoy'] * 100:+.0f}%" if c.get("sq_yoy") is not None else ""
+    extra = f"；多赚的部分相当于流通市值的 {c['surprise'] * 100:.1f}%" if c.get("surprise") is not None and sq > ly else ""
+    when = f"（{c['q_notice']} 公告）" if c.get("q_notice") else ""
+    return {"label": "业绩超预期", "status": "pass" if sq > ly else "info", "detail": head + tail + extra + when}
+
+
+def badge_of(c: dict) -> str:
+    """卡片右上角的一个数字：它入选的主要理由（不是排序分）。"""
+    sq, ly, g = c.get("sq"), c.get("sq_ly"), c.get("sq_yoy")
+    if sq is None or ly is None:
+        return f"冷热分 {c['cold']:.0f}"
+    if ly < 0 < sq:
+        return "单季扭亏"
+    if g is None:
+        return f"冷热分 {c['cold']:.0f}"
+    return f"单季利润 {g + 1:.1f} 倍" if g >= 2 else f"单季利润 {g * 100:+.0f}%"
+
+
+def build_pick(s: Stock, c: dict, temp: dict | None, as_of: str, score: int | None = None) -> dict:
     close = s.c[-1]
     mv = f"流通市值约 {c['float_mv'] / 1e8:.0f} 亿" if c.get("float_mv") else "流通市值没取到"
     growth = c.get("growth")
-    evidence = [{"label": "冷热分", "status": "pass", "detail": f"{c['cold']:.0f}（100 最冷）：全市场最没人追的一成"}] + cold_story(c) + [
+    evidence = [{"label": "冷热分", "status": "pass", "detail": f"{c['cold']:.0f}（100 最冷）：全市场最没人追的一成半"},
+                profit_story(c)] + cold_story(c) + [
+        {"label": "成交额", "status": "info",
+         "detail": (f"近 60 天平均每天 {_yi(c['amount'])}" if c.get("amount") else "近 60 天成交额没算出来") + f"；近 20 天涨停 {c['ups20']} 次"},
         {"label": "市值", "status": "pass", "detail": f"{mv}，比全市场 {c['size']:.0f}% 的股票大（不在最大的三成里）"},
-        {"label": "业绩", "status": "pass" if growth is not None else "warn",
-         "detail": (f"{c['report']}净利润同比 {growth * 100:+.0f}%" + (f"（{c['notice']} 公告）" if c.get("notice") else "") + f"，市盈率 {c['pe']:.0f} 倍")
-         if growth is not None else f"财报摘要没取到，没法确认利润在增长；市盈率 {c['pe']:.0f} 倍"},
+        {"label": "盈利", "status": "pass", "detail": f"市盈率 {c['pe']:.0f} 倍" + (f"；{c['report']}累计净利润同比 {growth * 100:+.0f}%" if growth is not None else "")},
         {"label": "近 60 天", "status": "info", "detail": f"{c['r60'] * 100:+.1f}%，离一年高点 {c['hi'] * 100:+.0f}%"},
     ]
     risks = ["入选的股票多半在阴跌、缩量，买了之后可能还要再磨一阵，甚至先再跌一段",
-             "单只仍有四成会亏——一定要分散买，不要只买一只",
+             "单只仍有三成多会亏——一定要分散买，几只等额，不要只买一只",
              "被 ST、财报由盈转亏、公告立案调查这类事发生时，不用等，直接卖"]
-    if temp and temp["value"] >= 80:
+    tier = timing_tier(score if score is not None else 0, temp)
+    if tier == "avoid":
         risks.insert(0, f"市场温度 {temp['value']:.0f}（很热）：历史上这种时候买入中期股票平均是亏的，名单只供观察，不建议现在买")
+    elif tier == "wait":
+        risks.insert(0, "今天不是建仓的日子（温度 40–80、大盘预估分不到 2）：先放进观察，等分数到 2 以上的日子再买")
+    headline = "全市场最没人追的一成半" + ("，最新一季利润比去年同季多赚了一截" if c.get("sq") is not None and c.get("sq_ly") is not None and c["sq"] > c["sq_ly"] else "") + "；拿到它变热为止"
     return {
         "key": s.key, "code": s.code, "name": c["name"], "kind": "stock", "industry": c["industry"],
-        "price": price(close), "as_of": as_of, "score": round(c["cold"], 1),
-        "headline": "全市场最没人追的一成，公司在赚钱" + (f"、利润同比 {growth * 100:+.0f}%" if growth is not None else "") + "；拿到它变热为止",
+        "price": price(close), "as_of": as_of, "score": round(c["score"], 1), "badge": badge_of(c),
+        "badge_title": "它入选的主要理由。入选的几只不分高低，等额买入",
+        "headline": headline,
         "evidence": evidence, "risks": risks,
         "spark": {"closes": [round(x, 2) for x in s.c[-120:]], "refs": []},
         "meters": [{"label": "冷热分", "value": c["cold"], "text": f"{c['cold']:.0f}（掉到 {EXIT_COLD} 以下就卖）"},
@@ -164,14 +252,14 @@ def build_pick(s: Stock, c: dict, temp: dict | None, as_of: str) -> dict:
             "entry": f"明天开盘买入；开盘价高于 {price(close * (1 + MAX_GAP))}（比今天收盘高 3%）就放弃。也可以分两三次、隔几天买",
             "ref_price": price(close), "target_price": None, "target_pct": None, "stop_price": None, "stop_pct": None,
             "stop_note": STOP_NOTE,
-            "position": "单只不超过总资金的一成，至少分散 5 只",
+            "position": "单只不超过总资金的一成，至少分散 5 只，几只等额",
             "rules": [
                 f"变热了就卖：冷热分掉到 {EXIT_COLD} 以下（说明开始有人追它了），第二天开盘卖。每周回来看一次就够——下面「之前入选的」会提醒",
                 "涨停：哪天收盘封在涨停，第二天开盘卖（涨停股次日平均高开 2%，之后往回走）",
                 f"到期：一直没变热的，买入后第 {HOLD} 个交易日（约半年）收盘卖出",
                 "不设价格止损（原因见下面「关于止损」）",
             ],
-            "expected": expected(temp),
+            "expected": expected(temp, score),
         },
     }
 
@@ -283,37 +371,39 @@ def check_days(calendar: list[int]) -> list[int]:
 
 def checkup(recent: dict) -> dict:
     new, old = ev.MID["all"]["new"], ev.MID["all"]["old"]
-    op = ev.MID["old_plan"]
+    prev = ev.MID["prev"]
     cn, co = ev.MID["cold"]["cand_h60"]["new"], ev.MID["cold"]["cand_h60"]["old"]
     hn, ho = ev.MID["cold"]["hot10_h60"]["new"], ev.MID["cold"]["hot10_h60"]["old"]
     bt = ev.MID["by_temp"]
-    bs = ev.MID["by_score"]
     return {
         "level": "ok", "n": new["n"], "win_rate": new["win"], "mean": new["mean"], "median": new["median"],
         "baseline": new["base"], "avg_days": new["days"], "span": "十年", "stocks": ev.NEW["pool"],
-        "verdict": (f"通过了两个十年的检验。{ev.NEW['label']}：每天按规则选 5 只，共 {new['n']} 笔，{new['win'] * 100:.0f}% 赚钱，平均每笔 {ev.pct(new['mean'])}"
-                    f"（平均拿 {new['days']:.0f} 个交易日），同期随便买是 {ev.pct(new['base'])}；"
+        "verdict": (f"通过了两个十年的检验。按现在的规则（新的排序、只在时机合适的日子建仓），{ev.NEW['label']}共 {new['n']} 笔，"
+                    f"{new['win'] * 100:.0f}% 赚钱，平均每笔 {ev.pct(new['mean'])}（平均拿 {new['days']:.0f} 个交易日），同期随便买是 {ev.pct(new['base'])}；"
                     f"{ev.OLD['label']}：{old['win'] * 100:.0f}% 赚钱，平均 {ev.pct(old['mean'])}，随便买是 {ev.pct(old['base'])}。优势是「比随便买好」，不是「稳赚」。"),
         "more": [
-            f"卖出规则比过：原来「拿满 60 天就卖」是 {op['new']['win'] * 100:.0f}% 赚钱、平均 {ev.pct(op['new']['mean'])}（{ev.NEW['short']}）/ "
-            f"{op['old']['win'] * 100:.0f}%、{ev.pct(op['old']['mean'])}（{ev.OLD['short']}）；改成「变热了才卖、最多拿半年」后是 "
-            f"{new['win'] * 100:.0f}%、{ev.pct(new['mean'])} / {old['win'] * 100:.0f}%、{ev.pct(old['mean'])}。",
-            f"买入时机（市场温度）：温度 40 以下买入，平均 {ev.pct(bt['lt40']['new']['mean'])}、{bt['lt40']['new']['win'] * 100:.0f}% 赚钱（{ev.NEW['short']}）/ "
-            f"{ev.pct(bt['lt40']['old']['mean'])}、{bt['lt40']['old']['win'] * 100:.0f}%（{ev.OLD['short']}）；40–80 之间 {ev.pct(bt['40to80']['new']['mean'])} / {ev.pct(bt['40to80']['old']['mean'])}；"
-            f"80 以上 {ev.pct(bt['ge80']['new']['mean'])} / {ev.pct(bt['ge80']['old']['mean'])}——很热的时候不买。",
-            f"买入时机（大盘预估分）：分数 ≥2 的日子买入，平均 {ev.pct(bs['ge2']['new']['mean'])} / {ev.pct(bs['ge2']['old']['mean'])}；"
-            f"分数 ≤−1 的日子买入，{ev.pct(bs['le-1']['new']['mean'])} / {ev.pct(bs['le-1']['old']['mean'])}。",
-            f"全部符合条件的股票（不只是选出来的 5 只）：之后 60 天比随便买多赚 {ev.pct(cn['ex'])}（{ev.NEW['short']}，{cn['pos_years']}/{cn['years']} 年跑赢）/ "
+            f"和上一版比：上一版每天都按冷热分选、不挑日子，每笔 {ev.pct(prev['new']['mean'])}、{ev.share(prev['new']['win'])} 赚钱（{ev.NEW['short']}）/ "
+            f"{ev.pct(prev['old']['mean'])}、{ev.share(prev['old']['win'])}（{ev.OLD['short']}）；现在是 {ev.pct(new['mean'])}、{ev.share(new['win'])} / "
+            f"{ev.pct(old['mean'])}、{ev.share(old['win'])}。",
+            ev.FACTS["mid_timing"],
+            ev.FACTS["mid_more"],
+            ev.FACTS["mid_rank"],
+            f"按市场温度分开看（新方法，每天都买的话）：温度 20 以下 {ev.pct(bt['lt20']['new']['mean'])} / {ev.pct(bt['lt20']['old']['mean'])}；"
+            f"20–40 {ev.pct(bt['20to40']['new']['mean'])} / {ev.pct(bt['20to40']['old']['mean'])}；40–80 {ev.pct(bt['40to80']['new']['mean'])} / {ev.pct(bt['40to80']['old']['mean'])}；"
+            f"80 以上 {ev.pct(bt['ge80']['new']['mean'])} / {ev.pct(bt['ge80']['old']['mean'])}。",
+            f"冷门股整体（最冷一成、在赚钱、利润增长的全部股票，不只是选出来的几只）：之后 60 天比随便买多赚 {ev.pct(cn['ex'])}（{ev.NEW['short']}，{cn['pos_years']}/{cn['years']} 年跑赢）/ "
             f"{ev.pct(co['ex'])}（{ev.OLD['short']}，{co['pos_years']}/{co['years']} 年跑赢）。",
             f"反面：最热的一成之后 60 天比随便买少赚 {-hn['ex'] * 100:.1f}% / {-ho['ex'] * 100:.1f}%，22 年里 {hn['pos_years'] + ho['pos_years']} 年跑赢。",
-            f"单只仍有四成会亏：赚的平均 {ev.pct(new['avg_win'], 0)}，亏的平均 {ev.pct(new['avg_loss'], 0)}，最差的 5% 亏 {-new['p5'] * 100:.0f}% 以上。",
+            f"单只仍有三成多会亏：赚的平均 {ev.pct(new['avg_win'], 0)}，亏的平均 {ev.pct(new['avg_loss'], 0)}，最差的 5% 亏 {-new['p5'] * 100:.0f}% 以上；"
+            f"最差的一篮子 {ev.pct(new['basket_worst'], 0)}（{ev.NEW['short']}）/ {ev.pct(old['basket_worst'], 0)}（{ev.OLD['short']}）。",
             f"亏钱的年份：{ev.years(new['bad_years'])}（{ev.NEW['short']}）、{ev.years(old['bad_years'])}（{ev.OLD['short']}）——都是大盘不好的年份。",
             STOP_NOTE,
-            "口径：信号收盘后才知道，第二天开盘买；开盘就涨停的买不进；封死跌停卖不掉顺延；每笔扣 0.2%。",
+            "口径：信号收盘后才知道，第二天开盘买；开盘就涨停的买不进；封死跌停卖不掉顺延；每笔扣 0.2%。财报按当时真正能看到的日子对齐。",
         ],
         "by_year": {"new": ev.MID["by_year"]["new"], "old": ev.MID["by_year"]["old"]},
-        "by_year_base": {"new": ev.MID["by_year_base"]["new"], "old": ev.MID["by_year_base"]["old"]},
+        "by_year_base": {"new": (ev.MID.get("by_year_base") or {}).get("new"), "old": (ev.MID.get("by_year_base") or {}).get("old")},
         "hist": ev.MID["hist"],
+        "rank": ev.MID["rank"],
         "recent": recent,
     }
 
@@ -327,49 +417,53 @@ def temp_table(temp: dict | None) -> list[dict]:
             for k, label in ev.MID_TEMP_ROWS]
 
 
+def timing_table(tier: str | None) -> list[dict]:
+    """五档建仓时机各自的历史结果。"""
+    out = []
+    for k, (cond, word, _) in TIMING.items():
+        x = ev.MID["tiers"][k]
+        out.append({"key": k, "label": f"{cond}（{word}）", "current": k == tier,
+                    **{w: ({"n": x[w]["n"], "mean": x[w]["mean"], "win": x[w]["win"]} if x[w] else None) for w in ("new", "old")}})
+    return out
+
+
 def timing(g: dict, temp: dict | None) -> dict:
-    """现在是不是建仓的时候：先看市场温度（大方向），再看大盘预估分（这几天）。"""
+    """现在是不是建仓的时候：市场温度定大方向，大盘预估分定哪几天。"""
     score = g["score"]
-    bs, bt = ev.MID["by_score"], ev.MID["by_temp"]
-    score_text = (f"大盘预估分 {score}：" + (f"这几天也是好时候（分数 ≥2 的日子买入，平均 {ev.pct(bs['ge2']['new']['mean'])} / {ev.pct(bs['ge2']['old']['mean'])}）。" if score >= gg.LIGHT
-                                         else "这几天不好不坏，可以先买一部分，剩下的等分数到 2 以上的日子再买。" if score >= 0
-                                         else "这几天偏弱，不用急，可以等分数回到 2 以上的日子再动手。"))
-    if not temp:
-        level = "go" if score >= gg.LIGHT else "wait" if score >= 0 else "avoid"
-        return {"level": level, "score": score, "temp": None, "text": score_text, "table": temp_table(None)}
+    tier = timing_tier(score, temp)
+    if tier is None:
+        level = "go" if score >= gg.LIGHT else "wait"
+        return {"level": level, "tier": None, "score": score, "temp": None, "table": timing_table(None),
+                "text": f"市场温度没取到，只看大盘预估分 {score}：" + ("这几天是好时候。" if level == "go" else "这几天不好不坏，可以等分数到 2 以上的日子再买。")}
     v = temp["value"]
-    if v >= 80:
-        level = "avoid"
-        text = (f"市场温度 {v:.0f}（很热）：现在不建仓。历史上温度 80 以上买入，平均 {ev.pct(bt['ge80']['new']['mean'])}（{ev.NEW['short']}）/ "
-                f"{ev.pct(bt['ge80']['old']['mean'])}（{ev.OLD['short']}），是亏的。名单只供观察。")
-    elif v < 40:
-        level = "go" if score >= 0 else "wait"
-        x = bt["lt20" if v < 20 else "20to40"]
-        text = (f"市场温度 {v:.0f}（{temp['label']}）：是建仓的好时候。历史上这个温度买入，平均 {ev.pct(x['new']['mean'])}、{x['new']['win'] * 100:.0f}% 赚钱（{ev.NEW['short']}）/ "
-                f"{ev.pct(x['old']['mean'])}、{x['old']['win'] * 100:.0f}%（{ev.OLD['short']}）。{score_text}")
-    else:
-        level = "wait"
-        x = bt["40to60" if v < 60 else "60to80"]
-        text = (f"市场温度 {v:.0f}（{temp['label']}）：可以买，但优势比市场冷的时候小——历史上这个温度买入，平均 {ev.pct(x['new']['mean'])}（{ev.NEW['short']}）/ "
-                f"{ev.pct(x['old']['mean'])}（{ev.OLD['short']}）。仓位小一点。{score_text}")
-    return {"level": level, "score": score, "temp": v, "text": text, "table": temp_table(temp)}
+    x = ev.MID["tiers"][tier]
+    nums = f"历史上这种日子建仓，每笔平均 {ev.pct(x['new']['mean'])}、{ev.share(x['new']['win'])} 赚钱（{ev.NEW['short']}）/ {ev.pct(x['old']['mean'])}、{ev.share(x['old']['win'])}（{ev.OLD['short']}）"
+    text = {
+        "best": f"市场温度 {v:.0f}（{temp['label']}），大盘预估分 {score}：是建仓最好的时候——{nums}，两个十年都没有亏钱的年份。",
+        "good": f"市场温度 {v:.0f}（{temp['label']}）：可以建仓——{nums}。碰上大盘预估分 ≥2 的日子更好，可以把一部分留到那时再买。",
+        "ok": f"市场温度 {v:.0f}（{temp['label']}），大盘预估分 {score}：可以买，但仓位小一点——{nums}，比市场冷的时候差一截。",
+        "wait": f"市场温度 {v:.0f}（{temp['label']}），大盘预估分只有 {score}：先不买，名单放着观察，等分数到 2 以上的日子再买——{nums}，近十年几乎没有优势。",
+        "avoid": f"市场温度 {v:.0f}（很热）：现在不建仓——{nums}，是亏的。名单只供观察。",
+    }[tier]
+    return {"level": TIMING[tier][2], "tier": tier, "score": score, "temp": v, "text": text, "table": timing_table(tier)}
 
 
 def select(stocks: dict[str, Stock], crosses: dict[int, Cross], g: dict, rows: dict[str, dict], reports: dict[str, dict],
-           calendar: list[int], as_of: str, n: int, temp: dict | None = None) -> dict:
+           calendar: list[int], as_of: str, n: int, temp: dict | None = None, quarters: dict[str, dict] | None = None) -> dict:
     cross = crosses.get(day_int(as_of)) or Cross(day_int(as_of))
-    cands, reasons = candidates(stocks, cross, rows, reports)
+    cands, reasons = candidates(stocks, cross, rows, reports, quarters)
     picked = diversify(cands, n)
     industry = {c: r.get("industry", "") for c, r in reports.items()}
     board = {
         "key": KEY, "title": TITLE, "name": NAME, "horizon": HORIZON, "idea": IDEA, "how": HOW,
         "timing": timing(g, temp),
-        "picks": [build_pick(stocks[c["code"]], c, temp, as_of) for c in picked],
+        "picks": [build_pick(stocks[c["code"]], c, temp, as_of, g["score"]) for c in picked],
+        "equal": {"text": ev.FACTS["mid_rank"], "rank": ev.MID["rank"]} if picked else None,
         "avoid": avoid_list(stocks, cross, rows, industry),
         "funnel": {"pool": len(stocks), "candidates": len(cands), "picked": len(picked), "reasons": reasons,
                    "cold": sum(1 for x in cross.cold if x >= COLD_MIN)},
         "checkup": checkup(recent_check(stocks, crosses, calendar, n)), "warnings": [],
     }
-    if not reports:
-        board["warnings"].append("全市场财报摘要没取到，中期板块这次没有检查「利润同比增长超过 10%」这一条，入选的股票请自己核对最新财报")
+    if not quarters:
+        board["warnings"].append("单季利润没取到，中期板块这次排序时没用上「业绩超预期」「单季利润同比」两项（按中间值算），入选的股票请自己核对最新财报")
     return board

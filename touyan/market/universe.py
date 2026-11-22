@@ -353,6 +353,61 @@ def latest_reports(cache, today: date) -> dict[str, dict]:
     return out
 
 
+# ── 单季利润：中期板块的「业绩超预期」要用 ───────────────────────────
+# 业绩报表里的净利润是「年初到本期」的累计。单季 = 本期累计 − 同一年上一期累计（一季报的累计就是单季）。
+# 「比去年同季多赚多少」还要去年同一期和它的上一期，所以最多要四张表；去年的几张一年都不会变，存 30 天。
+
+def prev_quarter(period: str) -> str | None:
+    """同一年里的上一个报告期；一季报没有上一期（返回 None）。"""
+    y, md = period[:4], period[5:]
+    return {"06-30": f"{y}-03-31", "09-30": f"{y}-06-30", "12-31": f"{y}-09-30"}.get(md)
+
+
+def last_year(period: str) -> str:
+    return f"{int(period[:4]) - 1}{period[4:]}"
+
+
+def single_quarter(tables: dict[str, dict[str, dict]], code: str, period: str) -> float | None:
+    """这只股票在 period 这一季的单季归母净利润（元）；缺数据时 None。"""
+    cur = (tables.get(period) or {}).get(code, {}).get("profit")
+    if cur is None:
+        return None
+    prev = prev_quarter(period)
+    if prev is None:
+        return cur
+    before = (tables.get(prev) or {}).get(code, {}).get("profit")
+    return None if before is None else cur - before
+
+
+def quarter_profits(cache, today: date, latest: dict[str, dict]) -> dict[str, dict]:
+    """每只股票最新一期的单季利润和去年同一季：{代码: {period, label, notice, sq, sq_ly}}（金额单位：元）。
+    latest：latest_reports 的结果（决定每只股票的「最新一期」是哪一期）。"""
+    need: dict[str, list[str]] = {}
+    for code, r in latest.items():
+        if r.get("period"):
+            need.setdefault(r["period"], []).append(code)
+    tables: dict[str, dict[str, dict]] = {}
+
+    def load(period: str | None, max_age: float):
+        if period and period not in tables:
+            tables[period] = _cached_period(cache, period, max_age)
+
+    out: dict[str, dict] = {}
+    for period, codes in need.items():
+        ly = last_year(period)
+        load(period, 20 * 3600)
+        load(prev_quarter(period), 7 * 86400)
+        load(ly, 30 * 86400)
+        load(prev_quarter(ly), 30 * 86400)
+        for code in codes:
+            sq, sq_ly = single_quarter(tables, code, period), single_quarter(tables, code, ly)
+            if sq is None or sq_ly is None:
+                continue
+            r = latest[code]
+            out[code] = {"period": period, "label": r.get("label", ""), "notice": r.get("notice", ""), "sq": sq, "sq_ly": sq_ly}
+    return out
+
+
 # ── 开放式基金排行（天天基金） ────────────────────────────────────
 
 FUND_RANK_URL = "https://fund.eastmoney.com/data/rankhandler.aspx"

@@ -12,6 +12,11 @@
 
 计划很简单：第二天开盘买，拿 5 个交易日，收盘跌破买入价 8% 止损。不设止盈——赚的那些平均赚 8%，
 设了止盈会把最赚钱的几笔截掉，平均收益反而更低。
+
+第二轮检验（实验 60–67）之后的两处改动：
+- 出手分档：分数 ≥4 且温度 <60，或分数 ≥3 且温度 <40，是「把握大」的日子（两个十年都没有亏钱的年份）；
+  分数 2 但温度 ≥60 的日子两个十年都不赚钱，改成不出手。
+- 入选的几只不再显示排序分：排第 1 的历史上并不比排第 5 的好，几只应该等额买入。
 """
 
 from __future__ import annotations
@@ -32,11 +37,14 @@ MIN_COLD = 50              # 冷热分在后一半（偏热）的不选
 IDEA = ("先看大盘，再决定出不出手。短线的输赢主要取决于哪天出手：同一套选股规则，只在「大盘预估分」高的日子用才赚钱，"
         "每天都用等于没用。分数不够就空仓——这是这个板块最常见、也最重要的结论。")
 HOW = [
-    "第一步 大盘：给今天收盘后的市场打分（放量、大涨大跌、涨停跌停多、月末月初加分；平淡、缩量扣分）。≥3 分出手，2 分轻仓，其余不出手",
+    "第一步 大盘：给今天收盘后的市场打分（放量、大涨大跌、涨停跌停多、月末月初加分；平淡、缩量扣分），再看市场温度。"
+    "分数 ≥4（温度 <60）或分数 ≥3（温度 <40）是把握大的出手日；分数 3、温度 40–60 正常出手；温度 60–80 或分数只有 2 的轻仓；"
+    "温度 80 以上、分数 2 且温度 60 以上、分数 ≤1 都不出手",
     "第二步 风格：小盘股近期领涨、市场活跃时偏向中小盘；市场冷清时偏向大盘",
     "第三步 板块：今天涨停最集中的板块不碰（这类板块之后平均跑输）",
     "第四步 选股：近 5 天、近 20 天跌得多，离一年高点远，冷热分偏冷（没人追）的；今天涨停、跌停或涨了 5% 以上的不选；公司要在赚钱",
     "第二天开盘买（高开 2% 以上放弃），拿 5 个交易日；收盘跌破买入价 8% 止损；不设止盈",
+    "入选的几只等额买入：历史上排第 1 的并不比排第 5 的好，挑着买反而增加运气成分",
 ]
 ETFS = {
     "小盘占优": [("SH:512100", "512100", "中证1000ETF", "中证1000"), ("SH:510500", "510500", "中证500ETF", "中证500")],
@@ -51,6 +59,8 @@ FAQ = [
           "0–1 分的日子（占一半）在 0 附近。机会集中在一成左右的日子里，其余时间不动才是对的。"},
     {"q": "为什么不设止盈？", "a": "检验过：设 6% 或 8% 的止盈，胜率能高几个点，但平均每笔少赚 0.6–1 个点——"
                               "赚钱的那些平均赚 8%，其中最赚的几笔正是被止盈截掉的。拿满 5 天再卖更划算。"},
+    {"q": "入选的几只为什么不分高低？", "a": ev.FACTS["short_rank"]},
+    {"q": "选股还能不能更准？", "a": ev.FACTS["short_more"]},
 ]
 
 
@@ -88,19 +98,24 @@ def candidates(stocks: dict[str, Stock], cross: Cross, rows: dict[str, dict], in
     return out, reasons
 
 
-def expected(stance: str) -> dict:
-    tier = "go" if stance == "go" else "light"
+TIER_TEXT = {"strong": "「把握大」的出手日（分数 ≥4 且温度 <60，或分数 ≥3 且温度 <40）",
+             "normal": "普通的出手日（分数 3、温度 40–60）",
+             "light": "轻仓的日子（分数 ≥3、温度 60–80，或分数 2、温度 <60）"}
+
+
+def expected(tier: str) -> dict:
+    """按今天所在的档位：历史上同一档的日子按规则买入的结果。"""
+    tier = tier if tier in TIER_TEXT else "light"
     new, old = ev.SHORT[tier]["new"], ev.SHORT[tier]["old"]
-    label = "分数 ≥3 的日子" if tier == "go" else "分数 ≥2 的日子"
-    text = (f"历史上{label}按这个规则买入（{ev.NEW['short']} {new['n']} 笔）：{new['win'] * 100:.0f}% 赚钱，平均每笔 {ev.pct(new['mean'])}，"
+    text = (f"历史上{TIER_TEXT[tier]}按这个规则买入（{ev.NEW['short']} {new['n']} 笔）：{new['win'] * 100:.0f}% 赚钱，平均每笔 {ev.pct(new['mean'])}，"
             f"中位 {ev.pct(new['median'])}；赚的平均 {ev.pct(new['avg_win'])}，亏的平均 {ev.pct(new['avg_loss'])}。"
             f"{ev.OLD['short']}（{old['n']} 笔）：{old['win'] * 100:.0f}% 赚钱，平均 {ev.pct(old['mean'])}。"
-            f"单只有四成会亏，所以要把今天的几只都买上，不要只挑一只。")
+            f"单只有三四成会亏，所以要把今天的几只都买上、等额买，不要只挑一只。")
     return {"available": True, "kind": "trade", "reliable": True, "n": new["n"], "win_rate": new["win"], "median": new["median"],
-            "mean": new["mean"], "avg_days": new["days"], "text": text}
+            "mean": new["mean"], "avg_days": new["days"], "tier": tier, "text": text}
 
 
-def build_pick(s: Stock, c: dict, stance: str, as_of: str) -> dict:
+def build_pick(s: Stock, c: dict, stance: str, as_of: str, tier: str = "") -> dict:
     close = s.c[-1]
     stop_ref = price(close * (1 - STOP))
     evidence = [
@@ -117,7 +132,8 @@ def build_pick(s: Stock, c: dict, stance: str, as_of: str) -> dict:
         risks.insert(0, f"今天是轻仓档：历史上这一档每笔平均只有 {ev.pct(ev.SHORT['light']['new']['mean'])}，仓位减半")
     return {
         "key": s.key, "code": s.code, "name": c["name"], "kind": "stock", "industry": c["industry"],
-        "price": price(close), "as_of": as_of, "score": round(c["score"], 1),
+        "price": price(close), "as_of": as_of, "score": round(c["score"], 1), "badge": f"5 天 {c['r5'] * 100:+.1f}%",
+        "badge_title": "近 5 个交易日的涨跌。入选的几只不分高低，等额买入",
         "headline": f"5 天跌了 {-c['r5'] * 100:.1f}%、离一年高点 {-c['hi'] * 100:.0f}%，没人追捧；大盘预估分够了，博 5 天的反弹",
         "evidence": evidence, "risks": risks,
         "spark": {"closes": [round(x, 2) for x in s.c[-120:]], "refs": [{"y": stop_ref, "label": "止损"}]},
@@ -136,7 +152,7 @@ def build_pick(s: Stock, c: dict, stance: str, as_of: str) -> dict:
                 "不设止盈：检验下来拿满 5 天比提前止盈赚得多",
                 "买入当天不能卖（T+1），所以高开太多宁可放弃",
             ],
-            "expected": expected(stance),
+            "expected": expected(tier if tier in TIER_TEXT else ("normal" if stance == "go" else "light")),
         },
     }
 
@@ -200,29 +216,34 @@ def recent_check(stocks: dict[str, Stock], crosses: dict[int, Cross], history: l
 
 def checkup(recent: dict) -> dict:
     """页面上「方法体检」那一块：长期的检验结果 + 最近的实际表现。"""
-    new, old = ev.SHORT["go"]["new"], ev.SHORT["go"]["old"]
+    go, strong = ev.SHORT["go"], ev.SHORT["strong"]
+    new, old = go["new"], go["old"]
+    prev = ev.SHORT["ge3"]
     every = ev.SHORT["everyday"]["new"]
     bad = ev.SHORT["bad_days"]["new"]
-    cold, warm = ev.SHORT["by_temp"]["lt40"], ev.SHORT["by_temp"]["ge60"]
+    s2h = ev.SHORT["skip_s2_hot"]
     return {
         "level": "ok", "n": new["n"], "win_rate": new["win"], "mean": new["mean"], "median": new["median"],
         "baseline": new["base"], "avg_days": new["days"], "span": "十年", "stocks": ev.NEW["pool"],
-        "verdict": (f"通过了两个十年的检验。{ev.NEW['label']}：分数 ≥3 的日子按规则买入共 {new['n']} 笔，{new['win'] * 100:.0f}% 赚钱，"
-                    f"平均每笔 {ev.pct(new['mean'])}（同样的日子随便买是 {ev.pct(new['base'])}）；"
-                    f"{ev.OLD['label']}：{old['n']} 笔，{old['win'] * 100:.0f}% 赚钱，平均 {ev.pct(old['mean'])}，12 年里{('只有 ' + ev.years(old['bad_years']) + '是亏的') if old['bad_years'] else '没有一年是亏的'}。"),
+        "verdict": (f"通过了两个十年的检验。按现在的分档，满仓出手的日子（把握大 + 一般）{ev.NEW['label']}共 {new['n']} 笔，{new['win'] * 100:.0f}% 赚钱，"
+                    f"平均每笔 {ev.pct(new['mean'])}（同样的日子随便买是 {ev.pct(new['base'])}）；{ev.OLD['label']} {old['n']} 笔，{old['win'] * 100:.0f}% 赚钱，"
+                    f"平均 {ev.pct(old['mean'])}。其中「把握大」的日子：{ev.pct(strong['new']['mean'])} / {ev.pct(strong['old']['mean'])}，"
+                    f"{ev.share(strong['new']['win'])} / {ev.share(strong['old']['win'])} 赚钱，两个十年都没有亏钱的年份。"),
         "more": [
+            f"和上一版比：上一版只看分数 ≥3，每笔 {ev.pct(prev['new']['mean'])} / {ev.pct(prev['old']['mean'])}，亏钱的年份是 {ev.years(prev['new']['bad_years'])} / {ev.years(prev['old']['bad_years'])}；"
+            f"加上温度分档后满仓日每笔 {ev.pct(new['mean'])} / {ev.pct(old['mean'])}，亏钱的年份 {ev.years(new['bad_years'])} / {ev.years(old['bad_years'])}。"
+            f"分数 2 但温度 60 以上的日子，以前算轻仓，检验下来 {ev.pct(s2h['new']['mean'])} / {ev.pct(s2h['old']['mean'])}，现在不出手。",
             f"对照一：同样的选股规则每天都用，{every['n']} 笔里只有 {every['win'] * 100:.0f}% 赚钱，平均 {ev.pct(every['mean'], 2)}——等于没用。",
             f"对照二：专挑分数 ≤−1 的日子用，{bad['win'] * 100:.0f}% 赚钱，平均 {ev.pct(bad['mean'], 2)}。所以分数不够的日子不出手。",
-            f"市场温度：温度 40 以下时出手，平均 {ev.pct(cold['new']['mean'])} / {ev.pct(cold['old']['mean'])}；60 以上只有 {ev.pct(warm['new']['mean'])} / {ev.pct(warm['old']['mean'])}；"
-            f"80 以上是 {ev.pct(ev.SHORT['by_temp']['ge80']['old']['mean'])}。去掉温度 80 以上的日子后，两个十年里没有一年是亏的。",
-            f"亏钱的年份：{ev.years(new['bad_years'])}（{ev.NEW['short']}）、{ev.years(old['bad_years'])}（{ev.OLD['short']}）。",
-            f"最差的情况：一篮子 5 只在 5 天里亏过 {-new['basket_worst'] * 100:.0f}%（近十年）/ {-old['basket_worst'] * 100:.0f}%（2015 年）。"
+            ev.FACTS["short_rank"],
+            f"最差的情况：满仓日一篮子 5 只在 5 天里亏过 {-new['basket_worst'] * 100:.0f}%（近十年）/ {-old['basket_worst'] * 100:.0f}%（更早的十年）。"
             "止损和单只一成仓位就是为这个准备的。",
-            ev.FACTS["short_hold"], ev.FACTS["short_entry"],
+            ev.FACTS["short_more"], ev.FACTS["short_hold"], ev.FACTS["short_entry"],
             "口径：信号收盘后才知道，第二天开盘买；开盘就涨停的买不进；当天买的当天不能卖；每笔扣 0.2%。",
         ],
         "by_year": {"new": ev.SHORT["by_year"]["new"], "old": ev.SHORT["by_year"]["old"]},
         "hist": ev.SHORT["hist"],
+        "rank": ev.SHORT["rank"],
         "recent": recent,
     }
 
@@ -239,7 +260,8 @@ def select(stocks: dict[str, Stock], crosses: dict[int, Cross], g: dict, rows: d
         "key": KEY, "title": TITLE, "name": NAME, "horizon": HORIZON, "idea": IDEA, "how": HOW,
         "gauge": {k: v for k, v in g.items() if k != "history"},
         "stance": {"key": g["stance"], "label": g["label"], "text": g["basis"]},
-        "picks": [build_pick(stocks[c["code"]], c, g["stance"], as_of) for c in picked],
+        "picks": [build_pick(stocks[c["code"]], c, g["stance"], as_of, g.get("tier", "")) for c in picked],
+        "equal": {"text": ev.FACTS["short_rank"], "rank": ev.SHORT["rank"]} if picked else None,
         "etfs": etf_picks(g, etf_quotes) if acting else None,
         "funnel": {"pool": len(stocks), "candidates": len(cands), "picked": len(picked), "reasons": reasons},
         "checkup": checkup(recent), "faq": FAQ, "warnings": [],
