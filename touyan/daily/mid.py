@@ -156,6 +156,9 @@ def build_pick(s: Stock, c: dict, temp: dict | None, as_of: str) -> dict:
         "price": price(close), "as_of": as_of, "score": round(c["cold"], 1),
         "headline": "全市场最没人追的一成，公司在赚钱" + (f"、利润同比 {growth * 100:+.0f}%" if growth is not None else "") + "；拿到它变热为止",
         "evidence": evidence, "risks": risks,
+        "spark": {"closes": [round(x, 2) for x in s.c[-120:]], "refs": []},
+        "meters": [{"label": "冷热分", "value": c["cold"], "text": f"{c['cold']:.0f}（掉到 {EXIT_COLD} 以下就卖）"},
+                   {"label": "成交（比一年平均）", "value": min(100.0, c["vabn"] * 50), "text": f"{c['vabn']:.2f} 倍"}],
         "plan": {
             "horizon": HORIZON, "hold_max": HOLD,
             "entry": f"明天开盘买入；开盘价高于 {price(close * (1 + MAX_GAP))}（比今天收盘高 3%）就放弃。也可以分两三次、隔几天买",

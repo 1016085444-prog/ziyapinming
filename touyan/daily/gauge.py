@@ -213,6 +213,21 @@ def history(tb: DayTable, start: int = 25) -> list[dict]:
     return out
 
 
+def recent_scores(tb: DayTable, n: int = 60) -> list[dict]:
+    """最近 n 个交易日每天的分数（含今天；给页面画图用）。"""
+    cal = tb.calendar
+    out = []
+    for j in range(max(25, len(cal) - n), len(cal)):
+        if tb.n[j] < 50:
+            continue
+        d = to_date(cal[j])
+        nxt = to_date(cal[j + 1]) if j + 1 < len(cal) else td.next_trading_day(d)
+        nxt2 = to_date(cal[j + 2]) if j + 2 < len(cal) else None
+        window = td.month_window(d, nxt, nxt2) if nxt2 else td.month_window(d, nxt)
+        out.append({"date": day_text(cal[j]), "score": total(score_parts(measure(tb, j), nxt, window)), "change": round(tb.mean(j), 4)})
+    return out
+
+
 def recent_check(hist: list[dict]) -> dict:
     """用池子自己最近两年多的行情再核对一遍：各分数档之后 5 天的实际结果。"""
     rows = []
@@ -300,7 +315,7 @@ def compute(stocks: dict[str, Stock], calendar: list[int], industry: dict[str, s
         "score": score, "stance": key, "label": label, "basis": basis, "parts": parts,
         "facts": {**m, "next_day": nxt.isoformat(), "next_weekday": WEEKDAYS[nxt.weekday()], "window": window},
         "table": evidence_table(score), "temp": temp_info, "temp_table": temp_table(temp),
-        "recent": recent_check(hist),
+        "recent": recent_check(hist), "scores": recent_scores(tb),
         "style": style(tb, j, m, nxt),
         "hot_sectors": hot_sectors(stocks, industry or {}),
         "next_window": {"days": wait, "text": "今天收盘后就是月末月初的窗口" if wait == 0 else f"离下一个月末月初窗口还有 {wait} 个交易日"},

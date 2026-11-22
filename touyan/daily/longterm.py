@@ -9,7 +9,8 @@
 - 行业是强者恒强：连续几年跑输的行业，之后一到三年继续落后（不是「跌多了就会补涨」）。所以长期走弱的行业不选。
 
 于是这里的做法是：先看温度决定买不买；买的话，从「稳健名单」里挑——公司在赚钱、近一年有现金分红、
-近三年年报 ROE 没有低于 8% 的、不属于四种热、所在行业不在长期走弱里——按股息率从高到低排，同一行业大类最多两只。
+近三年年报 ROE 没有低于 8% 的、最新财报的利润同比没有掉 20% 以上（高股息里混着利润在垮、分红保不住的，要筛掉）、
+不属于四种热、所在行业不在长期走弱里——按股息率从高到低排，同一行业大类最多两只。
 单只股票的运气成分很大（同样的规则挑 10 只，不同挑法十年下来年化能差出 10 个点），所以至少分散 8 只，
 或者干脆买指数基金；主动基金不推荐——过去三年业绩最好的那五分之一，之后三年反而比同类少赚 7 个点。
 """
@@ -25,6 +26,7 @@ from .pool import Stock, day_int
 KEY, TITLE, NAME = "long", "长期", "低温买入"
 HORIZON = "2–3 年"
 ROE_MIN = 8.0
+MIN_GROWTH = -0.20          # 最新财报累计净利润同比不能低于 −20%
 MIN_PICKS = 8
 BUY_BELOW, SELL_ABOVE = 40, 80
 
@@ -32,7 +34,7 @@ IDEA = ("先看市场贵不贵，再决定买不买。市场温度低于 40 时�
         "买什么反而是其次：从赚钱、分红、不热门、行业没在走下坡路的公司里分散着买，或者直接买指数基金。")
 HOW = [
     "第一步 看温度：市场温度低于 40 才买；40–60 少买、慢买；60 以上不新买；80 以上分批卖出",
-    "第二步 稳健名单：公司在赚钱；近一年有现金分红；近三年年报 ROE 没有低于 8% 的",
+    "第二步 稳健名单：公司在赚钱；近一年有现金分红；近三年年报 ROE 没有低于 8% 的；最新财报的净利润同比没有掉 20% 以上（防「高股息陷阱」）",
     "第三步 去掉四种热：一年波动最大的两成、换手最高的两成、被追捧的（冷热分最低的两成）、两年半涨得最多的两成",
     "第四步 去掉长期走弱的行业：行业两年半的表现排在后三成、最近半年也在后一半（行业是强者恒强，不是跌多了就补涨）",
     "按股息率从高到低排，同一行业大类最多两只；至少买 8 只，或者直接买下面的指数基金",
@@ -85,7 +87,7 @@ def expected(temp: dict | None) -> dict:
                 for w, x in ((ev.NEW, rows[(h, "new")]), (ev.OLD, rows[(h, "old")])) if x]
         return f"拿{name}：" + "；".join(bits) + "。" if bits else ""
 
-    text = (f"历史上在市场温度 {label} 时买入整个稳健名单（几百只，等权）：{part('2y', '两年')}{part('3y', '三年')}"
+    text = (f"历史上在市场温度 {label}的时候买入整个稳健名单（几百只，等权）：{part('2y', '两年')}{part('3y', '三年')}"
             "只买其中几只的话，结果会比这个分散得多——这是「名单整体」的统计，不是单只股票的承诺。")
     use = rows[("2y", "new")] or rows[("2y", "old")] or {}
     use3 = rows[("3y", "new")] or rows[("3y", "old")] or {}
@@ -97,7 +99,7 @@ def candidates(stocks: dict[str, Stock], cross: Cross, rows: dict[str, dict], re
                heat: dict[str, dict], trends: dict[str, dict]) -> tuple[list[dict], dict, dict]:
     """稳健名单，按股息率从高到低。返回 (名单, 没入选的原因计数, 每一步剩多少只)。"""
     out, reasons = [], {}
-    steps = {"profit": 0, "dividend": 0, "roe": 0, "calm": 0, "industry": 0}
+    steps = {"profit": 0, "dividend": 0, "roe": 0, "growth": 0, "calm": 0, "industry": 0}
 
     def miss(why):
         reasons[why] = reasons.get(why, 0) + 1
@@ -127,6 +129,14 @@ def candidates(stocks: dict[str, Stock], cross: Cross, rows: dict[str, dict], re
             miss(f"近三年年报的 ROE 有低于 {ROE_MIN:.0f}% 的")
             continue
         steps["roe"] += 1
+        growth = rep.get("yoy")
+        if reports and growth is None:
+            miss("没有取到最新财报的利润同比")
+            continue
+        if reports and growth < MIN_GROWTH:
+            miss("最新财报的净利润同比掉了 20% 以上（分红可能保不住）")
+            continue
+        steps["growth"] += 1
         if h["kinds"]:
             miss("属于「四种热」：" + h["kinds"][0])
             continue
@@ -180,6 +190,10 @@ def build_pick(s: Stock, c: dict, temp: dict | None, stance: dict, as_of: str) -
         "price": price(close), "as_of": as_of, "score": round(c["dy"] * 100, 1), "score_unit": "%",
         "headline": f"股息率 {c['dy'] * 100:.1f}%，近三年 ROE 最低 {min(roe):.0f}%，不在热门里" + ("，行业长期走强" if trend and trend["state"] == "strong" else ""),
         "evidence": evidence, "risks": risks,
+        "spark": {"closes": [round(x, 2) for x in s.c[-240:]], "refs": []},
+        "meters": [{"label": "股息率", "value": min(100.0, c["dy"] * 1000), "text": f"{c['dy'] * 100:.1f}%"},
+                   {"label": "冷热分", "value": h["cold"], "text": f"{h['cold']:.0f}（20 以下算热）"},
+                   {"label": "波动（全市场排位）", "value": h["vol_rank"], "text": f"{h['vol_rank']:.0f}%（80 以上算热）"}],
         "plan": {
             "horizon": HORIZON, "hold_max": None, "entry": entry,
             "ref_price": price(close), "target_price": None, "target_pct": None, "stop_price": None, "stop_pct": None,
@@ -279,9 +293,10 @@ def checkup() -> dict:
             ev.temp_strategy_text(),
             f"选股这一步的作用小得多，而且只有近十年明显：稳健名单每月更新、连续持有，年化 {ev.pct(L['steady_cagr']['new'])}（{ev.NEW['short']}，全池 {ev.pct(L['all_cagr']['new'])}）/ "
             f"{ev.pct(L['steady_cagr']['old'])}（{ev.OLD['short']}，全池 {ev.pct(L['all_cagr']['old'])}）；被剔掉的「四种热」是 {ev.pct(L['hot_cagr']['new'])} / {ev.pct(L['hot_cagr']['old'])}。"
-            "一次买入不动、拿满两年的话，稳健名单近十年比全池多 5.6 个点，更早的十年少 2.4 个点（那十年小盘股疯涨）。",
-            "单只股票分散不掉的运气：从名单里挑 10 只，按股息率挑近十年年化 +10.2%、更早的十年 +24.8%（全池 +4.3% / +23.6%）；"
-            "换成按低波动、按综合分去挑，结果能差出 5–10 个点。所以这里按股息率排、至少买 8 只。",
+            f"一次买入不动、拿满两年的话，稳健名单{ev.NEW['short']}平均 {ev.pct(s2n['ret'])}（全池 {ev.pct(s2n['base'])}），{ev.OLD['short']} {ev.pct(s2o['ret'])}（全池 {ev.pct(s2o['base'])}，那十年小盘股疯涨，稳健的并不占优）。",
+            "单只股票分散不掉的运气：从名单里按股息率挑 10 只、每季度复查，近十年年化 +12.7%、更早的十年 +15.4%（同期全池 +8.8% / +14.7%）；"
+            "换成按别的办法去挑，十年下来年化能差出 5–10 个点。所以这里按股息率排、至少买 8 只，或者直接买指数基金。",
+            "「利润同比不低于 −20%」这一条是为了筛掉高股息陷阱：不加它，按股息率排在最前面的 10 只近十年拿一年平均比全池少赚 2 个点；加上以后多赚 2 个点。",
             ev.FACTS["industry"],
             f"最坏的情况：温度 40 以下买入稳健名单、拿两年，最差的一次是 {ev.pct(cold_n['worst'], 0)}（{ev.NEW['short']}）/ {ev.pct(cold_o['worst'], 0)}（{ev.OLD['short']}）；"
             f"不看温度的话，拿一年最差 {ev.pct(L['steady_1y']['new']['worst'], 0)} / {ev.pct(L['steady_1y']['old']['worst'], 0)}。",
@@ -310,6 +325,8 @@ def select(stocks: dict[str, Stock], cross: Cross, rows: dict[str, dict], report
     }
     if not roes:
         board["warnings"].append("近几年的年报摘要没取到，长期板块这次没法检查 ROE，名单是空的")
+    if not reports:
+        board["warnings"].append("全市场财报摘要没取到，长期板块这次没有检查「利润同比不低于 −20%」这一条")
     if not trends:
         board["warnings"].append("行业走势这次没有算出来（行业分类没取到），长期板块没有按行业过滤")
     return board

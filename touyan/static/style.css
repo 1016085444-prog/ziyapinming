@@ -433,6 +433,99 @@ a.badge:hover { color: var(--text); }
 .faq:first-of-type { border-top: 0; }
 .faq summary { cursor: pointer; font-weight: 600; }
 .faq p { margin: 6px 0 0; color: var(--text-2); }
+/* ── 统计图（static/viz.js）：颜色只在图形上，文字一律用文字色 ── */
+:root { --div-cold: #2a78d6; --div-cool: #86b6ef; --div-mid: #c3c2b7; --div-warm: #f0a39b; --div-hot: #d03b3b; --viz-hl: rgba(42, 120, 214, 0.08); }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) { --div-cold: #3987e5; --div-cool: #1c5cab; --div-mid: #55554f; --div-warm: #a04a44; --div-hot: #e66767; --viz-hl: rgba(57, 135, 229, 0.14); }
+}
+:root[data-theme="dark"] { --div-cold: #3987e5; --div-cool: #1c5cab; --div-mid: #55554f; --div-warm: #a04a44; --div-hot: #e66767; --viz-hl: rgba(57, 135, 229, 0.14); }
+.viz { margin: 12px 0 0; min-width: 0; }
+.viz-cap { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin-bottom: 6px; }
+.viz-title { font-weight: 600; font-size: 14px; }
+.viz-sub, .viz-note { color: var(--muted); font-size: 12px; }
+.viz-note { margin-top: 4px; }
+.viz-legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 12px; color: var(--text-2); margin-bottom: 4px; }
+.viz-key { display: inline-flex; align-items: center; gap: 6px; }
+.viz-swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; flex: none; }
+.viz-swatch.line { width: 14px; height: 2px; border-radius: 1px; }
+.viz-swatch.dot { border-radius: 50%; }
+.viz-swatch.s1 { background: var(--s1); } .viz-swatch.s2 { background: var(--s2); } .viz-swatch.s3 { background: var(--s3); }
+.viz-swatch.up { background: var(--up); } .viz-swatch.down { background: var(--down); } .viz-swatch.mute { background: var(--axis); }
+.viz-stage { position: relative; min-width: 0; }
+.viz-stage svg { display: block; max-width: 100%; outline-offset: 2px; }
+.viz-grid { stroke: var(--grid); stroke-width: 1; }
+.viz-axis { stroke: var(--axis); stroke-width: 1; }
+.viz-ref { stroke: var(--axis); stroke-width: 1; }
+.viz-cross { stroke: var(--text-2); stroke-width: 1; pointer-events: none; }
+.viz-tick { fill: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+.viz-tick.strong { fill: var(--text); font-weight: 600; }
+.viz-label { fill: var(--text); font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.viz-hl { fill: var(--viz-hl); }
+.viz-fill.s1 { fill: var(--s1); } .viz-fill.s2 { fill: var(--s2); } .viz-fill.s3 { fill: var(--s3); }
+.viz-fill.up { fill: var(--up); } .viz-fill.down { fill: var(--down); } .viz-fill.mute { fill: var(--axis); }
+.viz-mark { cursor: default; outline: none; }
+.viz-mark:hover, .viz-mark:focus-visible { filter: brightness(1.12); stroke: var(--text); stroke-width: 1; }
+.viz-line { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.viz-line.thin { stroke-width: 1.5; }
+.viz-line.s1 { stroke: var(--s1); } .viz-line.s2 { stroke: var(--s2); } .viz-line.s3 { stroke: var(--s3); }
+.viz-line.mute-line { stroke: var(--text-2); }
+.viz-area { opacity: .1; stroke: none; }
+.viz-area.s1 { fill: var(--s1); } .viz-area.s2 { fill: var(--s2); }
+.viz-dot { stroke: var(--surface); stroke-width: 2; }
+.viz-dot.s1 { fill: var(--s1); } .viz-dot.s2 { fill: var(--s2); } .viz-dot.s3 { fill: var(--s3); } .viz-dot.mute { fill: var(--axis); }
+.viz-link { stroke: var(--axis); stroke-width: 2; }
+.viz-hit { fill: transparent; }
+.viz-hit:hover, .viz-hit:focus-visible { fill: var(--viz-hl); stroke: none; filter: none; }
+.viz-tip { position: absolute; display: none; z-index: 5; pointer-events: none; background: var(--surface); border: 1px solid var(--border-strong);
+  border-radius: 8px; padding: 6px 9px; font-size: 12px; box-shadow: var(--shadow); white-space: nowrap; }
+.viz-tip-title { color: var(--muted); margin-bottom: 2px; }
+.viz-tip-row { display: flex; align-items: center; gap: 6px; }
+.viz-tip-row strong { font-variant-numeric: tabular-nums; }
+.viz-tip-row span { color: var(--text-2); }
+.viz-table { margin-top: 4px; color: var(--text-2); }
+.viz-table summary { cursor: pointer; color: var(--muted); }
+.viz-spark { flex: none; }
+.viz-grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 4px 24px; }
+/* 温度计 */
+.viz-meter { margin: 6px 0 2px; }
+.viz-meter-box { position: relative; padding-top: 30px; }
+.viz-meter-track { display: flex; gap: 2px; height: 26px; }
+.viz-meter-seg { display: flex; align-items: center; justify-content: center; font-size: 12px; color: #fff; min-width: 0; opacity: .55; }
+.viz-meter-seg span { overflow: hidden; white-space: nowrap; }
+.viz-meter-seg:first-child { border-radius: 6px 0 0 6px; } .viz-meter-seg:last-child { border-radius: 0 6px 6px 0; }
+.viz-meter-seg.on { opacity: 1; font-weight: 700; }
+.viz-meter-seg.z-cold { background: var(--div-cold); } .viz-meter-seg.z-cool { background: var(--div-cool); color: #0b0b0b; }
+.viz-meter-seg.z-mild { background: var(--div-mid); color: #0b0b0b; } .viz-meter-seg.z-warm { background: var(--div-warm); color: #0b0b0b; }
+.viz-meter-seg.z-hot { background: var(--div-hot); }
+:root[data-theme="dark"] .viz-meter-seg.z-cool, :root[data-theme="dark"] .viz-meter-seg.z-mild, :root[data-theme="dark"] .viz-meter-seg.z-warm { color: #fff; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .viz-meter-seg.z-cool, :root:not([data-theme="light"]) .viz-meter-seg.z-mild, :root:not([data-theme="light"]) .viz-meter-seg.z-warm { color: #fff; } }
+.viz-meter-pin { position: absolute; top: 0; transform: translateX(-50%); display: grid; justify-items: center; }
+.viz-meter-pin b { font-size: 15px; line-height: 20px; }
+.viz-meter-pin::after { content: ""; width: 2px; height: 36px; background: var(--text); border-radius: 1px; }
+.viz-meter-scale { position: relative; height: 16px; font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.viz-meter-scale span { position: absolute; top: 2px; transform: translateX(-50%); }
+.viz-meter-scale span:first-child { transform: none; } .viz-meter-scale span:last-child { transform: translateX(-100%); }
+/* 一行一个比例 */
+.viz-mlist { display: grid; gap: 4px; font-size: 12px; }
+.viz-mrow { display: grid; grid-template-columns: minmax(84px, 9.5em) minmax(60px, 1fr) minmax(0, 13em); align-items: center; gap: 8px; }
+.viz-mname { color: var(--muted); }
+.viz-mbar { height: 8px; border-radius: 4px; background: var(--track); overflow: hidden; }
+.viz-mbar i { display: block; height: 100%; border-radius: 4px; background: var(--accent); }
+.viz-mval { color: var(--text-2); font-variant-numeric: tabular-nums; }
+/* 温度卡片、选股卡片里的图 */
+.temp-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.temp-num { font-size: 48px; font-weight: 700; line-height: 1; }
+.temp-label { font-size: 20px; font-weight: 700; }
+.temp-facts { display: grid; gap: 2px; color: var(--text-2); font-size: 13px; margin-top: 8px; }
+.pick-viz { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; margin: 2px 0 4px; }
+.pick-viz .viz-mlist { flex: 1 1 260px; min-width: 0; }
+.follow-sell td { background: var(--warn-bg); }
+.tag { display: inline-block; padding: 1px 7px; border-radius: 10px; font-size: 12px; background: var(--surface-3); color: var(--text-2); white-space: nowrap; }
+.tag.t-sell { background: var(--warn-bg); color: var(--warn-ink); font-weight: 600; }
+.tag.t-hold { background: var(--accent-soft); color: var(--text); }
+.stance.st-buy { border-left-color: var(--good); } .stance.st-buy strong { color: var(--good); }
+.stance.st-sell { border-left-color: var(--critical); } .stance.st-sell strong { color: var(--critical); }
+.stance.st-pause, .stance.st-wait { border-left-color: var(--warning); }
 @media (max-width: 640px) {
   .pick { padding: 12px; }
   .pick-levels { grid-template-columns: repeat(3, minmax(0, 1fr)); }

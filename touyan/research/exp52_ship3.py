@@ -2,7 +2,8 @@
 
 短期：规则不变（分数≥3 出手，拿 5 天，收盘跌破 8% 止损），加上按市场温度分开看。
 中期：选股不变；卖出改成「最多拿 120 个交易日；收盘涨停次日卖；冷热分掉到 30 以下次日卖；不设价格止损」。
-长期：稳健名单（赚钱 + 近一年分红 + 三年 ROE 不低于 8% + 不属于四种热），按建仓时的市场温度看一年、两年、三年。
+长期：稳健名单（赚钱 + 近一年分红 + 三年 ROE 不低于 8% + 最新财报利润同比不低于 −20% + 不属于四种热 + 行业不在长期走弱里），
+      按建仓时的市场温度看一年、两年、三年。
       「四种热」用软件里拿得到的口径：250 日波动最高两成、250 日换手最高两成、冷热分最低两成、两年半（600 日）涨幅最高两成。
 """
 import os, sys
@@ -90,8 +91,18 @@ DIVD = np.load(os.path.join(LC, "divd.npy")); DIV12 = roll_sum(DIVD, 250)[0]
 ann = np.load(os.path.join(LC, "annual.npy")); ROE_MIN3 = ann[1]
 volr = pct_rank(F("vol250"), U); turnr = pct_rank(F("turn250"), U); r6 = pct_rank(F("r600"), U); r6 = np.where(np.isfinite(r6), r6, 0.5)
 hot = (volr >= 0.8) | (turnr >= 0.8) | (cold < 0.2) | (r6 >= 0.8)
-sound = PROFIT & (DIV12 > 0) & (ROE_MIN3 >= 8)
-steady = U & ~hot & sound
+sound = PROFIT & (DIV12 > 0) & (ROE_MIN3 >= 8) & (GROW >= -0.20)          # 最新财报累计净利润同比没有大幅下滑（实验 57）
+# 行业长期走弱的不要（实验 54–56）：行业两年半的相对表现排在后三成、最近半年也在后一半
+_z = np.load(os.path.join(HERE, "indsig.npz"), allow_pickle=True)
+_pos = np.searchsorted(_z["d"], cal); _rel = _z["rel"]; _okI = _z["ok"]
+def _lag(x, k):
+    out = np.full(x.shape, np.nan); out[k:] = x[:-k]; return out
+_rank = lambda X: pd.DataFrame(np.where(_okI, X, np.nan)).rank(axis=1, pct=True).to_numpy()
+_weakI = (_rank(_rel / _lag(_rel, 600) - 1) < 0.3) & (_rank(_rel / _lag(_rel, 125) - 1) < 0.5)
+_col = {nm: k for k, nm in enumerate(list(_z["names"]))}
+_ik = np.array([_col.get(x, -1) for x in ind_of])
+WEAK = np.zeros((T, N), bool); WEAK[:, _ik >= 0] = _weakI[_pos][:, _ik[_ik >= 0]]
+steady = U & ~hot & sound & ~WEAK
 with np.errstate(invalid="ignore", divide="ignore"):
     DY = DIV12 / Cf
 OUT["long"] = {"steady_n": int(steady.sum(1)[300:].mean()), "hot_share": float((U & hot).sum(1)[300:].mean() / U.sum(1)[300:].mean())}

@@ -120,6 +120,9 @@ def build_pick(s: Stock, c: dict, stance: str, as_of: str) -> dict:
         "price": price(close), "as_of": as_of, "score": round(c["score"], 1),
         "headline": f"5 天跌了 {-c['r5'] * 100:.1f}%、离一年高点 {-c['hi'] * 100:.0f}%，没人追捧；大盘预估分够了，博 5 天的反弹",
         "evidence": evidence, "risks": risks,
+        "spark": {"closes": [round(x, 2) for x in s.c[-120:]], "refs": [{"y": stop_ref, "label": "止损"}]},
+        "meters": [{"label": "近 5 天跌幅", "value": c["r5_rank"], "text": f"比 {c['r5_rank']:.0f}% 的股票跌得多"},
+                   {"label": "冷热分", "value": c["cold"], "text": f"{c['cold']:.0f}（越高越没人追）"}],
         "plan": {
             "horizon": HORIZON, "hold_max": HOLD,
             "entry": f"明天开盘买入；开盘价高于 {price(close * (1 + MAX_GAP))}（比今天收盘高 2%）就放弃，不追",

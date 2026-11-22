@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 from array import array
+from bisect import bisect_right
 from collections import deque
 from math import log, sqrt
 
@@ -94,6 +95,8 @@ class Cross:
         self.col = {f: array("f") for f in FIELDS}
         self.cold: list[float] = []             # 0–100，越大越冷
         self.pos: dict[str, int] = {}
+        self._avg: list[float] = []             # 四项名次的平均（排冷热分之前）
+        self._sorted: dict | None = None
 
     def add(self, code: str, t: int, values: tuple[float, ...]) -> None:
         self.pos[code] = len(self.codes)
@@ -107,8 +110,23 @@ class Cross:
             return self
         n = len(self.codes)
         ranks = [pct_rank(list(self.col[f]), higher_better=False) for f in COLD_FIELDS]
-        self.cold = pct_rank([sum(r[i] for r in ranks) / len(ranks) for i in range(n)])
+        self._avg = [sum(r[i] for r in ranks) / len(ranks) for i in range(n)]
+        self.cold = pct_rank(self._avg)
         return self
+
+    def cold_for(self, values: tuple[float, ...]) -> float | None:
+        """一只不在这一天池子里的股票（比如成交缩到门槛以下、掉出了池子），放进来排的话冷热分大概是多少。"""
+        n = len(self.codes)
+        if not n or not self._avg:
+            return None
+        if self._sorted is None:
+            self._sorted = {f: sorted(self.col[f]) for f in COLD_FIELDS}
+            self._sorted["_avg"] = sorted(self._avg)
+        ranks = []
+        for f in COLD_FIELDS:
+            v = values[FIELDS.index(f)]
+            ranks.append((n - bisect_right(self._sorted[f], v) + 1) / n * 100)     # 越大越热，名次越低
+        return 100.0 * bisect_right(self._sorted["_avg"], sum(ranks) / len(ranks)) / n
 
     def get(self, code: str) -> dict | None:
         i = self.pos.get(code)
@@ -136,6 +154,20 @@ def crosses(stocks: dict[str, Stock], days: list[int]) -> dict[int, Cross]:
             out[d].add(code, t, prep.values(t))
     for cross in out.values():
         cross.rank()
+    return out
+
+
+def cold_series(s: Stock, crosses: dict[int, Cross]) -> dict[int, float]:
+    """不在池子里的股票：在算过横截面的那些天，它的冷热分（下标 → 分数）。"""
+    out, prep = {}, None
+    for day, cross in crosses.items():
+        t = s.index(day)
+        if t < MIN_T or not len(cross):
+            continue
+        prep = prep or Prep(s)
+        cold = cross.cold_for(prep.values(t))
+        if cold is not None:
+            out[t] = cold
     return out
 
 

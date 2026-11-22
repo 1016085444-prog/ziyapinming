@@ -125,8 +125,9 @@ class Store:
             picks = list(board["picks"]) + (board.get("etfs") or {}).get("picks", []) + (board.get("funds") or {}).get("picks", [])
             return [{"key": p["key"], "name": p["name"]} for p in picks]
 
-        summary = {"version": 2, "regime": payload["market"]["regime"]["label"],
-                   "boards": {k: names(b) for k, b in payload["boards"].items()}}
+        summary = {"version": 2, "pv": payload.get("version"), "regime": payload["market"]["regime"]["label"],
+                   "boards": {k: names(b) for k, b in payload["boards"].items()},
+                   "methods": {k: b.get("name", "") for k, b in payload["boards"].items()}}
         with self._lock:
             self._db.execute("DELETE FROM daily_runs WHERE as_of = ? AND strategy = ?", (payload["as_of"], strategy))
             self._db.execute("INSERT INTO daily_runs VALUES (?,?,?,?,?,?)",

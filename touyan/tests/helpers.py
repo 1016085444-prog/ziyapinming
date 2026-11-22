@@ -116,3 +116,34 @@ DECISION_REPLIES = {
     "交易员": "**操作**：买入\n```json\n{\"action\": \"Buy\", \"entry_price\": 100, \"stop_loss\": 93, \"take_profit\": 115, \"position\": \"三成\"}\n```",
     "投资经理": "**评级**：买入\n```json\n{\"rating\": \"Buy\", \"price_target\": 118.5, \"time_horizon\": \"3-6个月\", \"confidence\": \"中\", \"summary\": \"看多\"}\n```",
 }
+
+
+# ── 每日精选用的合成日线 ──────────────────────────────────────────────
+
+def price_path(n: int, seed: int = 1, start: float = 20.0, drift: float = 0.0003, vol: float = 0.015) -> list[float]:
+    """固定种子的随机收盘价。"""
+    rnd = random.Random(seed)
+    p, out = start, []
+    for _ in range(n):
+        p *= 1 + rnd.gauss(drift, vol)
+        out.append(round(p, 3))
+    return out
+
+
+def day_bars(closes: list[float], opens=None, highs=None, lows=None, amount=2e8, turnover: float = 1.5,
+             end: date | None = None) -> list[Bar]:
+    """按收盘价造带成交额、换手率的日线。开盘默认等于前收；opens/highs/lows/amount 可以给完整列表，
+    也可以给 {下标: 值} 只改其中几天。"""
+    days = trading_days(len(closes), end)
+    pick = lambda src, i, default: (src.get(i, default) if isinstance(src, dict) else src[i]) if src is not None else default  # noqa: E731
+    out, prev = [], closes[0]
+    for i, (d, c) in enumerate(zip(days, closes)):
+        o = pick(opens, i, prev)
+        h = pick(highs, i, max(o, c))
+        low = pick(lows, i, min(o, c))
+        a = pick(amount, i, None) if isinstance(amount, (list, dict)) else amount
+        if a is None:
+            a = 2e8
+        out.append(Bar(d, o, h, low, c, a / c, amount=a, turnover=turnover))
+        prev = c
+    return out
