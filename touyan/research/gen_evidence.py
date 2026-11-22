@@ -8,6 +8,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 R = os.path.join(HERE, "results") if os.path.isdir(os.path.join(HERE, "results")) and os.path.exists(os.path.join(HERE, "results", "ship3_new.json")) else HERE
 J = lambda name: json.load(open(os.path.join(R, name), encoding="utf-8"))
 S = {"new": J("ship3_new.json"), "old": J("ship3_old.json")}
+S4 = {"new": J("ship4_new.json"), "old": J("ship4_old.json")}         # 第二轮：短期分档、中期新方法（实验 67）
 
 
 def rnd(x, nd=4):
@@ -28,14 +29,25 @@ def trade(x):
     return rnd(out)
 
 
-def both(path, fn=trade):
+def both(path, fn=trade, src=None):
+    src = src or S
+
     def get(d):
         for p in path:
-            if p not in d:
+            if p not in d or d[p] is None:
                 return None
             d = d[p]
         return fn(d)
-    return {w: get(S[w]) for w in ("new", "old")}
+    return {w: get(src[w]) for w in ("new", "old")}
+
+
+def both4(path, fn=trade):
+    return both(path, fn, S4)
+
+
+def ranks(x):
+    """入选名次 1..10 之后的收益，按名次排成列表：[{rank, n, mean, win}, ...]。"""
+    return [dict(rank=int(k), **rnd(v)) for k, v in sorted(x.items(), key=lambda kv: int(kv[0]))]
 
 
 out = {}
@@ -45,26 +57,41 @@ out["SCORE_TABLE_RAW"] = {w: rnd(S[w]["score_table"]) for w in S}
 out["SCORE_BY_TEMP"] = {w: rnd(S[w]["score_by_temp"]) for w in S}
 # ── 短期 ──
 sh = {
-    "go": both(("short", "ge3")), "light": both(("short", "ge2")), "nostop": both(("short", "ge3_nostop")), "hold10": both(("short", "ge3_hold10")),
+    # 现在的规则（实验 67）：强 = 分数 ≥4 且温度 <60，或分数 ≥3 且温度 <40；一般 = 分数 3、温度 40–60；
+    # 轻仓 = 分数 ≥3、温度 60–80，或分数 2、温度 <60；go = 强 + 一般（满仓的两档）；act = 三档都算
+    "go": both4(("short", "go")), "strong": both4(("short", "strong")), "normal": both4(("short", "normal")), "light": both4(("short", "light")),
+    "act": both4(("short", "act")), "skip_s2_hot": both4(("short", "skip_s2_hot")), "skip_hot80": both4(("short", "skip_hot80")),
+    "days_per_year": {k: {w: round(S4[w]["short"][k]["per_year"], 1) for w in S4} for k in ("strong", "normal", "light", "go")},
+    "rank": {w: ranks(S4[w]["short"]["rank"]) for w in S4},
+    # 上一版的规则（只看分数 ≥3，不分温度），留作对照
+    "ge3": both(("short", "ge3")), "ge2": both(("short", "ge2")),
+    "nostop": both(("short", "ge3_nostop")), "hold10": both(("short", "ge3_hold10")),
     "everyday": both(("short", "everyday")), "bad_days": both(("short", "le-1")),
-    "by_year": {w: rnd(S[w]["short"]["ge3"]["by_year"]) for w in S},
-    "by_year_win": {w: rnd(S[w]["short"]["ge3"]["by_year_win"]) for w in S},
-    "by_year_n": {w: rnd(S[w]["short"]["ge3"]["by_year_n"]) for w in S},
-    "hist": {w: S[w]["short"]["ge3"]["hist"] for w in S},
+    "by_year": {w: rnd(S4[w]["short"]["go"]["by_year"]) for w in S4},
+    "by_year_win": {w: rnd(S4[w]["short"]["go"]["by_year_win"]) for w in S4},
+    "by_year_n": {w: rnd(S4[w]["short"]["go"]["by_year_n"]) for w in S4},
+    "hist": {w: S4[w]["short"]["go"]["hist"] for w in S4},
     "by_temp": {k: both(("short", f"temp_{k}")) for k in ("lt40", "40to60", "60to80", "ge60", "ge80", "lt80", "lt60")},
 }
 out["SHORT"] = sh
 # ── 中期 ──
+_exit = lambda e: {"limit_or_hot": int(e.get("3", 0)), "expire": int(e.get("0", 0))}
 md = {
-    "all": both(("mid", "all")), "old_plan": both(("mid", "old60")), "stop12": both(("mid", "stop12")), "stop20": both(("mid", "stop20")),
+    # 现在的方法（实验 67）：冷热分 ≥85 的中小盘、在赚钱，按超预期等五项排序；温度 <40 随时买，40–80 只在大盘分 ≥2 的日子买
+    "all": both4(("mid", "new")), "every_day": both4(("mid", "new_all")), "stop12": both4(("mid", "stop12")),
+    "prev": both4(("mid", "old_all")), "prev_policy": both4(("mid", "old_policy")),
+    "tiers": {k: both4(("mid", "tiers", k)) for k in ("best", "good", "ok", "wait", "avoid")},
+    "by_temp": {k: both4(("mid", "by_temp", k)) for k in ("lt20", "20to40", "lt40", "40to60", "60to80", "40to80", "ge80")},
+    "rank": {w: ranks(S4[w]["mid"]["rank"]) for w in S4},
+    "picked": {w: rnd(S4[w]["mid"]["picked"]) for w in S4},
+    "old_plan": both(("mid", "old60")), "stop20": both(("mid", "stop20")),
     "by_score": {k: both(("mid", f"score_{k}")) for k in ("ge2", "0to1", "le-1")},
-    "by_temp": {k: both(("mid", f"temp_{k}")) for k in ("lt20", "20to40", "lt40", "40to60", "60to80", "40to80", "ge80")},
-    "by_year": {w: rnd(S[w]["mid"]["all"]["by_year"]) for w in S},
-    "by_year_win": {w: rnd(S[w]["mid"]["all"]["by_year_win"]) for w in S},
-    "by_year_base": {w: rnd(S[w]["mid"]["all"]["by_year_base"]) for w in S},
-    "hist": {w: S[w]["mid"]["all"]["hist"] for w in S},
-    "exit_reasons": {w: S[w]["mid"]["exit_reasons"] for w in S},
-    "candidates": {w: S[w]["mid"]["candidates"] for w in S},
+    "by_year": {w: rnd(S4[w]["mid"]["new"]["by_year"]) for w in S4},
+    "by_year_win": {w: rnd(S4[w]["mid"]["new"]["by_year_win"]) for w in S4},
+    "by_year_base": {w: rnd(S4[w]["mid"]["new"]["by_year_base"]) for w in S4},
+    "hist": {w: S4[w]["mid"]["new"]["hist"] for w in S4},
+    "exit_reasons": {w: _exit(S4[w]["mid"]["new"]["exit"]) for w in S4},
+    "candidates": {w: round(S4[w]["mid"]["candidates"]) for w in S4},
     "cold": {k: {w: rnd({a: b for a, b in S[w]["cold"][k].items() if a != "by_year"}) for w in S} for k in ("hot10_h20", "hot10_h60", "hot20_h120", "cold10_h60", "cand_h20", "cand_h60", "cand_h120")},
     "hot_by_year": {w: rnd(S[w]["cold"]["hot10_h60"]["by_year"]) for w in S},
 }
