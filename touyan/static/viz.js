@@ -271,17 +271,18 @@
         top += ph + gapP;
       });
       /* 横轴标签：按实际宽度排，前一个的右边和后一个的左边至少隔开 8px，不重叠 */
+      /* 最后一个（最新的日期）一定标出来；它靠右对齐不出界，前面的标签给它让位 */
       var lastRight = -1e9;
+      var tailW = String(x[n - 1]).length * 6.6;
+      var tailAnchor = X(n - 1) + tailW / 2 > W - 2 ? 'end' : 'middle';
+      var tailLeft = tailAnchor === 'end' ? X(n - 1) - tailW : X(n - 1) - tailW / 2;
       for (var i = 0; i < n; i++) {
         var label = String(x[i]);
         var w = label.length * 6.6;
         var anchor = 'middle', left = X(i) - w / 2;
         if (i === 0) { anchor = 'start'; left = X(i); }
-        else if (left + w > W - 2) {
-          if (i < n - 1) continue;
-          anchor = 'end'; left = X(i) - w;   /* 最后一个（最新的日期）靠右对齐，不出界 */
-        }
-        if (left < lastRight + 8) continue;
+        if (i === n - 1 && n > 1) { anchor = tailAnchor; left = tailLeft; }
+        else if (n > 1 && (left < lastRight + 8 || left + w + 8 > tailLeft)) continue;
         add(svg, S('text', { x: X(i), y: total - 8, class: 'viz-tick', 'text-anchor': anchor }, label));
         lastRight = left + w;
       }

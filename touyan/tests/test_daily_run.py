@@ -175,6 +175,10 @@ class RunnerTest(unittest.TestCase):
         for part in ("# 每日精选", "## 大盘", "## 市场温度", "## 短期 · 看天出手", "## 中期 · 冷门蓄势", "## 长期 · 低温买入",
                      "## 定投 · 看温度定投", "方法体检", "预期收益", "什么时候卖", "### 行业风向", "| 指数 | 基金 | 方法"):
             self.assertIn(part, md)
+        lb = boards["long"]
+        self.assertGreater(len(lb["picks"]), 1)
+        self.assertIsNotNone(T.shared_expected(lb["picks"]), "长期的预期是整个名单的统计，每只都一样")
+        self.assertEqual(md.count(lb["picks"][0]["plan"]["expected"]["text"]), 1, "一样的预期收益只写一次")
 
         perf = track.performance(self.store, self.router)
         self.assertEqual(len(perf["runs"]), 1)

@@ -26,15 +26,28 @@ def checkup_text(c: dict) -> list[str]:
     return out
 
 
-def pick_text(i: int, p: dict) -> list[str]:
+def _expected_line(ex: dict) -> str:
+    return ("（这个方法没通过历史检验，下面的数字仅供参考）" if ex.get("reliable") is False else "") + ex.get("text", "")
+
+
+def shared_expected(picks: list[dict]) -> dict | None:
+    """同一个板块里每只的「预期收益」是同一段话时（整批的统计），只说一次。"""
+    if len(picks) < 2:
+        return None
+    t = picks[0]["plan"]["expected"].get("text")
+    return picks[0]["plan"]["expected"] if t and all(p["plan"]["expected"].get("text") == t for p in picks) else None
+
+
+def pick_text(i: int, p: dict, shared: bool = False) -> list[str]:
     plan = p["plan"]
     score = f"{p['score']:.1f}{p['score_unit']}" if p.get("score_unit") else f"{p['score']:.0f} 分"
     head = f"### {i}. {p['name']}（{p['code']}）" + (f" · {p['industry']}" if p.get("industry") else "") + f" · {score}"
     out = ["", head, p["headline"]]
     out += [f"- {ICONS.get(e['status'], '・')} {e['label']}：{e['detail']}" for e in p["evidence"]]
-    out += ["", f"**持有时间**：{plan['horizon']}　**仓位**：{plan.get('position', '')}", f"**怎么买**：{plan['entry']}",
-            "**预期收益**：" + ("（这个方法没通过历史检验，下面的数字仅供参考）" if plan["expected"].get("reliable") is False else "")
-            + plan["expected"].get("text", ""), "**什么时候卖**："]
+    out += ["", f"**持有时间**：{plan['horizon']}　**仓位**：{plan.get('position', '')}", f"**怎么买**：{plan['entry']}"]
+    if not shared:
+        out.append("**预期收益**：" + _expected_line(plan["expected"]))
+    out.append("**什么时候卖**：")
     out += [f"- {r}" for r in plan["rules"]]
     if plan.get("stop_note"):
         out.append(f"**关于止损**：{plan['stop_note']}")
@@ -122,8 +135,11 @@ def board_text(b: dict) -> list[str]:
     elif not b["picks"]:
         reasons = "；".join(f"{k} {v} 只" for k, v in list((f.get("reasons") or {}).items())[:4])
         out += ["", "今天没有符合条件的。" + (f"没入选的主要原因：{reasons}。" if reasons else "")]
+    shared = shared_expected(b["picks"])
+    if shared:
+        out += ["", "**预期收益（下面这几只都一样）**：" + _expected_line(shared)]
     for i, p in enumerate(b["picks"], 1):
-        out += pick_text(i, p)
+        out += pick_text(i, p, shared=bool(shared))
     if b.get("following"):
         out += following_text(b["following"])
     etfs = b.get("etfs")

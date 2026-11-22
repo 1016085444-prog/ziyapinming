@@ -692,6 +692,23 @@ class FollowTest(unittest.TestCase):
 
 # ── 检验数字 ──────────────────────────────────────────────────────
 
+
+class TextTest(unittest.TestCase):
+    def pick(self, text, name="甲"):
+        return {"name": name, "code": "600000", "score": 1, "headline": "", "evidence": [], "risks": [],
+                "plan": {"horizon": "5 个交易日", "entry": "开盘买", "rules": ["到期卖"], "expected": {"text": text}}}
+
+    def test_shared_expected_once(self):
+        from daily import text as T
+        same = [self.pick("历史上平均 +3%", n) for n in ("甲", "乙", "丙")]
+        self.assertEqual(T.shared_expected(same)["text"], "历史上平均 +3%")
+        self.assertIsNone(T.shared_expected(same[:1]), "只有一只时照常写在它自己下面")
+        self.assertIsNone(T.shared_expected([self.pick("A"), self.pick("B")]))
+        self.assertIsNone(T.shared_expected([self.pick(""), self.pick("")]), "没有文字就不算")
+        lines = T.pick_text(1, same[0], shared=True)
+        self.assertFalse(any(l.startswith("**预期收益**") for l in lines))
+        self.assertTrue(any(l.startswith("**预期收益**") for l in T.pick_text(1, same[0])))
+
 class EvidenceTest(unittest.TestCase):
     def test_numbers_hold_together(self):
         for w in ("new", "old"):

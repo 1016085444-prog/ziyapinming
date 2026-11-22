@@ -1394,7 +1394,14 @@
     return h('div', { class: 'plan-stats wide' }, items);
   }
 
-  function pickCard(pick, n) {
+  /* 同一个板块里每只的「预期收益」常常是同一段话（按市场温度、按分数算的是整批的统计），一样的就只在上面说一次 */
+  function sharedExpected(picks) {
+    if (picks.length < 2) return null;
+    var t = (picks[0].plan.expected || {}).text;
+    return t && picks.every(function (p) { return (p.plan.expected || {}).text === t; }) ? picks[0].plan.expected : null;
+  }
+
+  function pickCard(pick, n, sharedEx) {
     var plan = pick.plan, ex = plan.expected || {};
     var href = '#/a/' + encodeURIComponent(pick.key) + (pick.kind === 'etf' ? '?kind=etf' : '');
     var digits = pick.kind === 'fund' ? 4 : (pick.price && pick.price < 5 ? 3 : 2);
@@ -1421,7 +1428,7 @@
       h('div', { class: 'plan-box' },
         planHeadline(pick),
         h('div', { class: 'small' }, h('strong', null, '怎么买：'), plan.entry + (plan.position ? '。' + plan.position + '。' : '')),
-        h('div', { class: 'small' }, h('strong', null, '预期收益：'),
+        sharedEx ? null : h('div', { class: 'small' }, h('strong', null, '预期收益：'),
           ex.reliable === false && ex.available ? h('span', { class: 'bad-mark' }, '这个方法没通过历史检验，数字仅供参考。') : null, ex.text || ''),
         h('div', { class: 'small' }, h('strong', null, '什么时候卖：')),
         h('ul', { class: 'plan-rules small' }, plan.rules.map(function (r) { return h('li', null, r); })),
@@ -1438,7 +1445,10 @@
   }
 
   function pickList(picks, funnel, emptyText) {
-    if (picks.length) return picks.map(function (x, i) { return pickCard(x, i + 1); });
+    var shared = sharedExpected(picks);
+    if (picks.length) return [shared ? h('div', { class: 'stance st-light' }, h('strong', null, '预期收益（下面这几只都一样）'),
+      h('div', null, shared.reliable === false && shared.available ? h('span', { class: 'bad-mark' }, '这个方法没通过历史检验，数字仅供参考。') : null, shared.text)) : null]
+      .concat(picks.map(function (x, i) { return pickCard(x, i + 1, !!shared); }));
     return h('div', { class: 'empty' }, emptyText, funnel ? h('div', { class: 'small', style: { marginTop: '8px', textAlign: 'left' } }, reasonList(funnel)) : null);
   }
 
