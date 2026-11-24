@@ -517,6 +517,221 @@ class MySQLCodeStore:
         }
 
 
+def _ejson(v):
+    """把接口返回的 EJSON（{"$numberInt": "3"} 这类）还原成普通值。"""
+    if isinstance(v, dict):
+        if len(v) == 1:
+            k, x = next(iter(v.items()))
+            if k in ("$numberInt", "$numberLong"):
+                return int(x)
+            if k == "$numberDouble":
+                return float(x)
+            if k == "$oid":
+                return x
+        return {k: _ejson(x) for k, x in v.items()}
+    if isinstance(v, list):
+        return [_ejson(x) for x in v]
+    return v
+
+
+class TcbDocCodeStore:
+    """云开发文档型数据库卡密仓储，走云开发 HTTP API。
+
+    环境变量：
+      TCB_ENV_ID      云开发环境 ID
+      TCB_API_KEY     控制台「API Key」页生成的服务端密钥（管理员权限，只放服务端）
+      TCB_COLLECTION  集合名（默认 ziya_codes）
+
+    每张卡密一条记录，_id 就是卡密本身，天然不重复。
+    """
+
+    _FIELDS = ("code", "status", "birth_summary", "note", "created_at",
+               "bound_at", "last_used_at", "use_count")
+
+    def __init__(self, env_id: str, api_key: str, collection: str = "ziya_codes"):
+        self.env_id = env_id
+        self.api_key = api_key
+        self.collection = re.sub(r"[^A-Za-z0-9_]", "", collection) or "ziya_codes"
+        self.base = (
+            f"https://{env_id}.api.tcloudbasegateway.com/v1/database/instances/"
+            f"(default)/databases/(default)"
+        )
+        self.init_db()
+
+    def _call(self, method: str, path: str, body=None, params=None, ok404=False):
+        import json
+        import urllib.error
+        import urllib.parse
+        import urllib.request
+
+        url = self.base + path
+        if params:
+            url += "?" + urllib.parse.urlencode(params)
+        data = json.dumps(body).encode() if body is not None else None
+        req = urllib.request.Request(url, data=data, method=method, headers={
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        })
+        try:
+            with urllib.request.urlopen(req, timeout=15) as r:
+                raw = r.read()
+        except urllib.error.HTTPError as e:
+            if ok404 and e.code == 404:
+                return None
+            detail = e.read().decode("utf-8", "replace")[:300]
+            raise RuntimeError(f"云开发数据库接口出错 {e.code}：{detail}") from None
+        return _ejson(json.loads(raw)) if raw else {}
+
+    def _docs(self) -> str:
+        return f"/collections/{self.collection}/documents"
+
+    def _get(self, code: str) -> Optional[Dict]:
+        from urllib.parse import quote
+        return self._call("GET", f"{self._docs()}/{quote(code, safe='')}", ok404=True)
+
+    def _update(self, query: Dict, fields: Dict, inc: Optional[Dict] = None) -> int:
+        data = {"$set": fields}
+        if inc:
+            data["$inc"] = inc
+        res = self._call("PATCH", self._docs(), {"query": query, "data": data})
+        return int(res.get("updated", 0) or res.get("matched", 0))
+
+    def init_db(self) -> None:
+        try:
+            self._call("POST", "/collections", {"collectionName": self.collection})
+        except RuntimeError as e:
+            # 409 = 集合已存在，正常
+            if " 409" not in str(e) and "ALREADY_EXIST" not in str(e):
+                raise
+
+    def generate(self, count: int = 10, prefix: str = "ZY", note: str = "") -> List[str]:
+        if count < 1 or count > 2000:
+            raise ValueError("单次生成数量须在 1 到 2000 之间")
+        pfx = _CODE_CLEAN_RE.sub("", (prefix or "ZY").upper())[:4] or "ZY"
+        now = _now_iso()
+        clean_note = (note or "").strip()[:80]
+        created: List[str] = []
+        while len(created) < count:
+            batch = []
+            for _ in range(min(100, count - len(created))):
+                c = f"{pfx}-" + "".join(secrets.choice(_ALPHABET) for _ in range(4)) \
+                    + "-" + "".join(secrets.choice(_ALPHABET) for _ in range(4))
+                batch.append({
+                    "_id": c, "code": c, "status": "unused", "birth_key": None,
+                    "birth_summary": None, "note": clean_note, "created_at": now,
+                    "bound_at": None, "last_used_at": None, "use_count": 0,
+                })
+            try:
+                self._call("POST", self._docs(), {"data": batch})
+            except RuntimeError as e:
+                # 31^8 种组合撞号几乎不可能；真撞了整批换新码重来
+                if "duplicate" in str(e).lower() or "E11000" in str(e):
+                    continue
+                raise
+            created.extend(d["code"] for d in batch)
+        return created
+
+    def verify_and_bind(
+        self, raw_code: str, birth_key: str, birth_summary: str
+    ) -> Tuple[bool, str, str]:
+        code = normalize_code(raw_code)
+        if not code:
+            return False, "missing", "请输入兑换密码后再排盘"
+        now = _now_iso()
+
+        row = self._get(code)
+        if row is None:
+            return False, "invalid", "兑换密码无效，请核对是否输错字符"
+        if row.get("status") == "disabled":
+            return False, "disabled", "该兑换密码已停用，请联系客服核实"
+
+        if row.get("status") == "unused":
+            # 带条件更新：只有仍是 unused 才绑定，两人同时抢一个码只会成一个
+            n = self._update(
+                {"_id": code, "status": "unused"},
+                {"status": "bound", "birth_key": birth_key, "birth_summary": birth_summary,
+                 "bound_at": now, "last_used_at": now, "use_count": 1},
+            )
+            if n == 1:
+                return True, "bound_new", "密码已激活并绑定当前生辰"
+            row = self._get(code) or {}  # 被别人抢先绑了，按已绑定处理
+
+        if row.get("status") == "bound" and row.get("birth_key") == birth_key:
+            self._update({"_id": code}, {"last_used_at": now}, inc={"use_count": 1})
+            return True, "bound_same", "已验证，正在载入你的专属命盘"
+        if row.get("status") == "disabled":
+            return False, "disabled", "该兑换密码已停用，请联系客服核实"
+        return (
+            False,
+            "mismatch",
+            "此密码已绑定其他生辰，一个密码仅限排测一人（八字与紫微两套盘通用）",
+        )
+
+    def stats(self) -> Dict[str, int]:
+        import json
+
+        counts = {}
+        for s in ("unused", "bound", "disabled"):
+            res = self._call("GET", self._docs(), params={
+                "query": json.dumps({"status": s}), "count": "true"})
+            counts[s] = int(res.get("total", 0))
+        counts["total"] = sum(counts.values())
+        return counts
+
+    def list_codes(
+        self, status: Optional[str] = None, q: Optional[str] = None, limit: int = 200
+    ) -> List[Dict]:
+        import json
+
+        limit = max(1, min(int(limit), 1000))
+        query: Dict = {}
+        if status in ("unused", "bound", "disabled"):
+            query["status"] = status
+        if q and q.strip():
+            rx = {"$regex": re.escape(q.strip()), "$options": "i"}
+            query["$or"] = [{"code": rx}, {"note": rx}, {"birth_summary": rx}]
+        out: List[Dict] = []
+        while len(out) < limit:
+            page = min(100, limit - len(out))  # 接口单页有上限，分页取
+            res = self._call("GET", self._docs(), params={
+                "query": json.dumps(query, ensure_ascii=False),
+                "order": json.dumps([{"field": "created_at", "direction": "desc"},
+                                     {"field": "code", "direction": "asc"}]),
+                "offset": len(out), "limit": page,
+            })
+            items = res.get("list") or []
+            out.extend({k: d.get(k) for k in self._FIELDS} for d in items)
+            if len(items) < page:
+                break
+        return out
+
+    def set_disabled(self, raw_code: str, disabled: bool) -> bool:
+        code = normalize_code(raw_code)
+        row = self._get(code)
+        if row is None:
+            return False
+        new_status = "disabled" if disabled else ("bound" if row.get("birth_key") else "unused")
+        self._update({"_id": code}, {"status": new_status})
+        return True
+
+    def reset_code(self, raw_code: str) -> bool:
+        code = normalize_code(raw_code)
+        if self._get(code) is None:
+            return False
+        self._update({"_id": code}, {
+            "status": "unused", "birth_key": None, "birth_summary": None,
+            "bound_at": None, "last_used_at": None, "use_count": 0})
+        return True
+
+    def storage_info(self) -> Dict[str, str]:
+        return {
+            "backend": "tcb-doc",
+            "persistent_hint": "cloud",
+            "label": f"云开发文档型数据库（{self.env_id} / {self.collection}）",
+            "warning": "",
+        }
+
+
 def _mysql_env() -> Optional[Tuple[str, int, str, str, str]]:
     addr = os.environ.get("MYSQL_ADDRESS", "").strip()
     host = os.environ.get("MYSQL_HOST", "").strip()
@@ -542,6 +757,16 @@ _DEFAULT_STORE_KEY = None
 
 def get_store():
     global _DEFAULT_STORE, _DEFAULT_STORE_KEY
+    env_id = os.environ.get("TCB_ENV_ID", "").strip()
+    api_key = os.environ.get("TCB_API_KEY", "").strip()
+    if env_id and api_key:
+        coll = os.environ.get("TCB_COLLECTION", "ziya_codes").strip()
+        key = ("tcb", env_id, coll)
+        if _DEFAULT_STORE is None or _DEFAULT_STORE_KEY != key:
+            _DEFAULT_STORE = TcbDocCodeStore(env_id, api_key, coll)
+            _DEFAULT_STORE_KEY = key
+        return _DEFAULT_STORE
+
     my = _mysql_env()
     if my is not None:
         key = ("mysql", my[0], my[1], my[2], my[4])

@@ -225,7 +225,7 @@ async function tryLogin(t) {
     if (st.storage) {
       const bar = $('#storage-bar');
       bar.hidden = false;
-      if (st.storage.backend === 'mysql') {
+      if (st.storage.persistent_hint === 'cloud') {
         bar.style.borderColor = 'rgba(98,168,123,.45)';
         bar.style.background = 'rgba(98,168,123,.12)';
         bar.style.color = '#8BD3A5';
