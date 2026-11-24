@@ -539,7 +539,8 @@ class TcbDocCodeStore:
 
     环境变量：
       TCB_ENV_ID      云开发环境 ID
-      TCB_API_KEY     控制台「API Key」页生成的服务端密钥（管理员权限，只放服务端）
+      TCB_API_KEY     服务端 API Key（管理员权限，只放服务端）；
+                      也可在云托管里打开「API Key 设置」，平台会注入为 CLOUDBASE_APIKEY
       TCB_COLLECTION  集合名（默认 ziya_codes）
 
     每张卡密一条记录，_id 就是卡密本身，天然不重复。
@@ -758,7 +759,8 @@ _DEFAULT_STORE_KEY = None
 def get_store():
     global _DEFAULT_STORE, _DEFAULT_STORE_KEY
     env_id = os.environ.get("TCB_ENV_ID", "").strip()
-    api_key = os.environ.get("TCB_API_KEY", "").strip()
+    # 云托管「API Key 设置」开关注入的变量名是 CLOUDBASE_APIKEY
+    api_key = (os.environ.get("TCB_API_KEY") or os.environ.get("CLOUDBASE_APIKEY") or "").strip()
     if env_id and api_key:
         coll = os.environ.get("TCB_COLLECTION", "ziya_codes").strip()
         key = ("tcb", env_id, coll)
