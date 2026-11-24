@@ -20,6 +20,7 @@ const selectedPlace = ZiyaPlaces.selected;
 const birthDate = initBirthDate();
 // 返回的 askQuestion 供「待定论」里的按钮取用
 const askQuestion = initWechat(state);
+initCodeGate(state);
 
 // ── 排盘 ─────────────────────────────────────────────────
 
@@ -52,11 +53,20 @@ function readForm(form) {
     return null;
   }
 
+  const code = form.code ? form.code.value.trim().toUpperCase() : '';
+  if (state.requireCode !== false && !code) {
+    errBox.textContent = '请输入专属兑换密码后再排盘';
+    errBox.hidden = false;
+    if (form.code) form.code.focus();
+    return null;
+  }
+
   const [h, mi] = time.split(':').map(Number);
   return {
     year: ymd.year, month: ymd.month, day: ymd.day, hour: h, minute: mi,
     gender: form.gender.value,
     tst: form.tst.checked, latezi: form.latezi.checked, dst: form.dst.checked,
+    code: code,
   };
 }
 
@@ -83,6 +93,7 @@ async function cast(p, beat) {
         use_true_solar_time: p.tst,
         late_zi_shifts_day: p.latezi,
         adjust_china_dst: p.dst,
+        code: p.code || '',
       }),
     });
     if (!res.ok) throw new Error((await res.json()).detail || '排盘失败');
@@ -98,13 +109,18 @@ async function cast(p, beat) {
     }
 
     render(data, place.name);
-    // 把这个生辰挂到所有「换紫微斗数」的入口上，免得用户重填一遍。
+    const activeCode = (data.code_info && data.code_info.code) || p.code || '';
+    if (data.code_info && data.code_info.state === 'bound_new') {
+      showToast('密码已绑定当前生辰，八字与紫微双盘均可查看');
+    }
+    // 把这个生辰与密码挂到所有「换紫微斗数」的入口上，免得用户重填一遍。
     // 用类而不是 id：命盘旁与「为什么分数不同」里各有一个入口。
     const q = '/ziwei' + ZiyaPlaces.birthQuery({
       year: p.year, month: p.month, day: p.day,
       hour: p.hour, minute: p.minute,
       gender: p.gender, place: place.name,
       tst: p.tst, latezi: p.latezi, dst: p.dst,
+      code: activeCode,
     });
     document.querySelectorAll('.to-other').forEach((a) => { a.href = q; });
     $('#landing').hidden = true;
@@ -116,7 +132,7 @@ async function cast(p, beat) {
   } finally {
     btn.disabled = false;
     btn.classList.remove('casting');
-    btn.textContent = '排 盘';
+    btn.textContent = '启 盘 推 演';
   }
 }
 
@@ -136,6 +152,7 @@ async function cast(p, beat) {
   form.tst.checked = b.tst;
   form.latezi.checked = b.latezi;
   form.dst.checked = b.dst;
+  if (form.code && b.code) form.code.value = b.code;
 })();
 
 $('#redo').addEventListener('click', () => {

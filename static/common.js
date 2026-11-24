@@ -126,21 +126,53 @@ async function loadSiteConfig(state) {
   try {
     const cfg = await (await fetch('/api/config')).json();
     state.wechatId = cfg.wechat_id || '';
-    $('#wx-id').textContent = state.wechatId;
-    $('#wx-offer').textContent = cfg.wechat_offer || '';
+    state.requireCode = cfg.require_code !== false;
+    if ($('#wx-id')) $('#wx-id').textContent = state.wechatId;
+    if ($('#wx-offer')) $('#wx-offer').textContent = cfg.wechat_offer || '';
+    document.querySelectorAll('.js-wx-id').forEach((n) => {
+      n.textContent = state.wechatId;
+    });
+
+    const codeBlock = $('#code-gate');
+    const codeInput = $('#redeem-code');
+    if (codeBlock && codeInput) {
+      codeBlock.hidden = !state.requireCode;
+      codeInput.required = !!state.requireCode;
+    }
 
     const qr = $('#wx-qr');
-    if (cfg.wechat_qr) {
+    if (qr && cfg.wechat_qr) {
       qr.src = cfg.wechat_qr;
       qr.hidden = false;
-      $('#wx-hint').textContent = '手机上长按二维码识别 · 或复制微信号后在微信里搜索';
-    } else {
+      if ($('#wx-hint')) $('#wx-hint').textContent = '手机上长按二维码识别 · 或复制微信号后在微信里搜索';
+    } else if ($('#wx-hint')) {
       $('#wx-hint').textContent = '复制微信号后，在微信「添加朋友」里搜索';
     }
   } catch (err) {
     console.warn('配置读取失败：', err);
   }
   return state.wechatId;
+}
+
+/** 初始化兑换密码框：自动大写、从 URL ?code= 预填，并绑定内联复制微信号。 */
+function initCodeGate(state) {
+  const input = $('#redeem-code');
+  if (input) {
+    const urlCode = new URLSearchParams(window.location.search).get('code');
+    if (urlCode) input.value = urlCode.trim().toUpperCase();
+    input.addEventListener('input', () => {
+      const pos = input.selectionStart;
+      input.value = input.value.toUpperCase();
+      try { input.setSelectionRange(pos, pos); } catch (_) {}
+    });
+  }
+  document.querySelectorAll('.js-copy-wx').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const id = state.wechatId || 'ziyapinming';
+      const ok = await copyText(id);
+      showToast(ok ? '微信号 ' + id + ' 已复制' : '请手动添加微信：' + id);
+    });
+  });
 }
 
 // ── 剪贴板 ───────────────────────────────────────────────

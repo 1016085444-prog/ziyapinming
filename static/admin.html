@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>子牙品命 · 卡密管理台</title>
+<link rel="stylesheet" href="/static/style.css?v=__V__">
+<style>
+main { max-width: 880px; }
+.adm-head { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
+.adm-back { color: var(--gold); font-size: .88rem; text-decoration: none; border-bottom: 1px solid var(--line-warm); }
+.stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: .8rem; margin: 1.2rem 0 1.4rem; }
+.stat-box { background: rgba(255,255,255,.025); border: 1px solid var(--line); border-radius: 12px; padding: .95rem 1rem; text-align: center; }
+.stat-box b { display: block; font-family: var(--serif); font-size: 1.75rem; color: var(--gold-lit); line-height: 1.2; }
+.stat-box span { font-size: .78rem; color: var(--muted); letter-spacing: .08em; }
+.adm-row { display: flex; gap: .7rem; flex-wrap: wrap; align-items: flex-end; }
+.adm-row .field { flex: 1 1 160px; margin: 0; }
+.adm-actions { display: flex; gap: .6rem; flex-wrap: wrap; margin-top: .9rem; }
+.btn-sm { background: transparent; border: 1px solid var(--line-warm); color: var(--gold-lit); border-radius: 8px; padding: .42rem .8rem; font-size: .82rem; cursor: pointer; font-family: inherit; }
+.btn-sm:hover { background: rgba(205,163,73,.14); }
+.btn-danger { border-color: rgba(208,100,80,.45); color: #E89687; }
+.created-box { width: 100%; min-height: 130px; margin-top: .9rem; background: #090B10; color: var(--gold-lit); border: 1px solid var(--line-warm); border-radius: 10px; padding: .8rem; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .88rem; line-height: 1.65; }
+.code-table { width: 100%; border-collapse: collapse; margin-top: 1rem; font-size: .86rem; }
+.code-table th, .code-table td { text-align: left; padding: .65rem .55rem; border-bottom: 1px solid var(--line); vertical-align: middle; }
+.code-table th { color: var(--muted); font-weight: 500; font-size: .78rem; letter-spacing: .06em; }
+.code-mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--gold-lit); letter-spacing: .06em; }
+.badge { display: inline-block; padding: .15rem .55rem; border-radius: 999px; font-size: .74rem; }
+.badge-unused { background: rgba(98,168,123,.16); color: #8BD3A5; border: 1px solid rgba(98,168,123,.35); }
+.badge-bound { background: rgba(205,163,73,.16); color: var(--gold-lit); border: 1px solid var(--line-warm); }
+.badge-disabled { background: rgba(208,100,80,.15); color: #E89687; border: 1px solid rgba(208,100,80,.35); }
+@media (max-width: 640px) { .stats-grid { grid-template-columns: repeat(2, 1fr); } }
+</style>
+</head>
+<body>
+<header class="masthead">
+  <div class="adm-head">
+    <div class="brand">
+      <span class="brand-mark">子牙品命</span>
+      <span class="brand-sub">一次性密码 · 发卡管理台</span>
+    </div>
+    <a class="adm-back" href="/">返回排盘首页 →</a>
+  </div>
+</header>
+
+<main>
+  <section class="panel" id="login-panel">
+    <h2>管理员验证</h2>
+    <p class="lede">输入服务器环境变量 <code>ADMIN_TOKEN</code> 对应的口令。口令仅保存在当前浏览器会话中。</p>
+    <div class="adm-row" style="margin-top:1rem">
+      <label class="field">
+        <span>管理口令</span>
+        <input type="password" id="token-input" placeholder="输入 ADMIN_TOKEN">
+      </label>
+      <button type="button" class="btn-primary" id="login-btn" style="width:auto;padding:.78rem 1.8rem;margin:0">进 入</button>
+    </div>
+    <p class="form-error" id="login-err" hidden></p>
+  </section>
+
+  <div id="app" hidden>
+    <section class="panel">
+      <div class="adm-head">
+        <h2>卡密库存总览</h2>
+        <button type="button" class="btn-sm" id="logout-btn">退出登录</button>
+      </div>
+      <p id="storage-bar" style="margin:.7rem 0 0;font-size:.82rem;padding:.55rem .85rem;border-radius:10px;border:1px solid var(--line-warm);background:rgba(205,163,73,.07);color:var(--gold-lit)" hidden></p>
+      <div class="stats-grid">
+        <div class="stat-box"><b id="st-total">0</b><span>累计生成</span></div>
+        <div class="stat-box"><b id="st-unused">0</b><span>待发货 / 未使用</span></div>
+        <div class="stat-box"><b id="st-bound">0</b><span>已绑定生辰</span></div>
+        <div class="stat-box"><b id="st-disabled">0</b><span>已停用</span></div>
+      </div>
+
+      <h2 style="margin-top:1.4rem">批量生成卡密</h2>
+      <div class="adm-row" style="margin-top:.8rem">
+        <label class="field">
+          <span>生成数量</span>
+          <input type="number" id="gen-count" value="50" min="1" max="2000">
+        </label>
+        <label class="field">
+          <span>批次备注（选填）</span>
+          <input type="text" id="gen-note" placeholder="如：小红书第一批">
+        </label>
+        <button type="button" class="btn-primary" id="gen-btn" style="width:auto;padding:.78rem 1.6rem;margin:0">一键生成</button>
+      </div>
+
+      <div id="gen-result" hidden>
+        <div class="adm-actions">
+          <button type="button" class="btn-sm" id="copy-created">复制本批全部密码</button>
+          <button type="button" class="btn-sm" id="download-created">下载本批 .txt（直接导自动发货）</button>
+        </div>
+        <textarea class="created-box" id="created-text" readonly></textarea>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="adm-head">
+        <h2>卡密查询与售后</h2>
+        <button type="button" class="btn-sm" id="export-unused">导出全部未使用 .txt</button>
+      </div>
+      <div class="adm-row" style="margin-top:.9rem">
+        <label class="field">
+          <span>状态筛选</span>
+          <select id="filter-status">
+            <option value="">全部</option>
+            <option value="unused">未使用</option>
+            <option value="bound">已绑定</option>
+            <option value="disabled">已停用</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>搜索密码 / 备注 / 生辰</span>
+          <input type="search" id="filter-q" placeholder="输入 ZY- 或备注关键字">
+        </label>
+        <button type="button" class="btn-sm" id="refresh-btn" style="padding:.72rem 1.2rem">查询刷新</button>
+      </div>
+
+      <div class="table-scroll">
+        <table class="code-table">
+          <thead>
+            <tr>
+              <th>密码</th>
+              <th>状态</th>
+              <th>绑定生辰</th>
+              <th>次数</th>
+              <th>备注</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody id="code-tbody"></tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+</main>
+
+<div class="toast" id="toast" hidden></div>
+<script src="/static/common.js?v=__V__"></script>
+<script>
+'use strict';
+let token = sessionStorage.getItem('ziya_admin_token') || '';
+let lastCreated = [];
+
+async function api(path, opts) {
+  const res = await fetch(path, Object.assign({
+    headers: { 'Content-Type': 'application/json', 'X-Admin-Token': token }
+  }, opts || {}));
+  if (!res.ok) {
+    let msg = '请求失败';
+    try { msg = (await res.json()).detail || msg; } catch (_) {}
+    throw new Error(msg);
+  }
+  return res;
+}
+
+function paintStats(s) {
+  $('#st-total').textContent = s.total || 0;
+  $('#st-unused').textContent = s.unused || 0;
+  $('#st-bound').textContent = s.bound || 0;
+  $('#st-disabled').textContent = s.disabled || 0;
+}
+
+function downloadTxt(filename, text) {
+  const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+async function loadList() {
+  const st = $('#filter-status').value;
+  const q = $('#filter-q').value.trim();
+  const params = new URLSearchParams({ limit: '200' });
+  if (st) params.set('status', st);
+  if (q) params.set('q', q);
+  const data = await (await api('/api/admin/codes?' + params.toString())).json();
+  paintStats(data.stats);
+  const tb = $('#code-tbody');
+  tb.innerHTML = '';
+  const labels = { unused: '未使用', bound: '已绑定', disabled: '已停用' };
+  for (const it of data.items) {
+    const tr = document.createElement('tr');
+    const tdCode = el('td', 'code-mono', it.code);
+    const tdSt = el('td');
+    tdSt.append(el('span', 'badge badge-' + it.status, labels[it.status] || it.status));
+    const tdBirth = el('td', '', it.birth_summary || '—');
+    const tdUse = el('td', '', String(it.use_count || 0));
+    const tdNote = el('td', '', it.note || '—');
+    const tdOp = el('td');
+
+    if (it.status === 'bound') {
+      const bReset = el('button', 'btn-sm', '解绑重测');
+      bReset.onclick = async () => {
+        if (!confirm('确认解除 ' + it.code + ' 的生辰绑定？（买家填错生日时使用）')) return;
+        await api('/api/admin/codes/' + encodeURIComponent(it.code) + '/reset', { method: 'POST' });
+        showToast('已解绑，恢复为未使用');
+        loadList();
+      };
+      tdOp.append(bReset, ' ');
+    }
+    const bTog = el('button', 'btn-sm' + (it.status === 'disabled' ? '' : ' btn-danger'), it.status === 'disabled' ? '启用' : '停用');
+    bTog.onclick = async () => {
+      await api('/api/admin/codes/' + encodeURIComponent(it.code) + '/toggle', {
+        method: 'POST',
+        body: JSON.stringify({ disabled: it.status !== 'disabled' }),
+      });
+      showToast(it.status === 'disabled' ? '已恢复启用' : '已停用该密码');
+      loadList();
+    };
+    tdOp.append(bTog);
+    tr.append(tdCode, tdSt, tdBirth, tdUse, tdNote, tdOp);
+    tb.append(tr);
+  }
+}
+
+async function tryLogin(t) {
+  token = (t || '').trim();
+  $('#login-err').hidden = true;
+  try {
+    const st = await (await api('/api/admin/stats')).json();
+    sessionStorage.setItem('ziya_admin_token', token);
+    $('#login-panel').hidden = true;
+    $('#app').hidden = false;
+    if (st.storage) {
+      const bar = $('#storage-bar');
+      bar.hidden = false;
+      if (st.storage.backend === 'mysql') {
+        bar.style.borderColor = 'rgba(98,168,123,.45)';
+        bar.style.background = 'rgba(98,168,123,.12)';
+        bar.style.color = '#8BD3A5';
+        bar.textContent = '✓ 持久化正常：' + st.storage.label + '（云托管缩容/更新不丢密码）';
+      } else {
+        bar.textContent = '⚠ 当前存储：' + st.storage.label + '。' + (st.storage.warning || '');
+      }
+    }
+    await loadList();
+  } catch (err) {
+    sessionStorage.removeItem('ziya_admin_token');
+    $('#login-err').textContent = err.message;
+    $('#login-err').hidden = false;
+  }
+}
+
+$('#login-btn').onclick = () => tryLogin($('#token-input').value);
+$('#token-input').addEventListener('keydown', (e) => { if (e.key === 'Enter') tryLogin($('#token-input').value); });
+$('#logout-btn').onclick = () => {
+  sessionStorage.removeItem('ziya_admin_token');
+  token = '';
+  $('#app').hidden = true;
+  $('#login-panel').hidden = false;
+  $('#token-input').value = '';
+};
+
+$('#gen-btn').onclick = async () => {
+  const count = Number($('#gen-count').value) || 50;
+  const note = $('#gen-note').value.trim();
+  try {
+    const data = await (await api('/api/admin/codes', {
+      method: 'POST',
+      body: JSON.stringify({ count, prefix: 'ZY', note }),
+    })).json();
+    lastCreated = data.created || [];
+    $('#created-text').value = lastCreated.join('\n');
+    $('#gen-result').hidden = false;
+    paintStats(data.stats);
+    showToast('已生成 ' + lastCreated.length + ' 个一次性密码');
+    loadList();
+  } catch (err) {
+    showToast(err.message);
+  }
+};
+
+$('#copy-created').onclick = async () => {
+  const ok = await copyText(lastCreated.join('\n'));
+  showToast(ok ? '已复制全部密码到剪贴板' : '复制失败，请手动全选文本框');
+};
+$('#download-created').onclick = () => {
+  downloadTxt('ziyapinming-codes-batch.txt', lastCreated.join('\n') + '\n');
+};
+$('#export-unused').onclick = async () => {
+  try {
+    const txt = await (await api('/api/admin/codes/export')).text();
+    if (!txt.trim()) { showToast('当前没有未使用的密码'); return; }
+    downloadTxt('ziyapinming-unused-codes.txt', txt + '\n');
+  } catch (err) { showToast(err.message); }
+};
+$('#refresh-btn').onclick = loadList;
+$('#filter-status').onchange = loadList;
+
+if (token) tryLogin(token);
+</script>
+</body>
+</html>

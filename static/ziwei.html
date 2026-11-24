@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>子牙品命 · 紫微斗数排盘</title>
-<meta name="description" content="高精度紫微斗数排盘：农历以定朔定气实时推算，不用查表；十四主星带庙旺利陷，四化落宫、大限小限一并排出。排盘免费，不限次数。">
+<meta name="description" content="高精度紫微斗数排盘：农历以定朔定气实时推算，十四主星带庙旺利陷，四化落宫、大限小限一并排出。一码启双盘，专属绑定随时回看。">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%2313110F'/%3E%3Ctext x='16' y='23' font-size='20' font-family='serif' fill='%23C9A961' text-anchor='middle'%3E%E7%B4%AB%3C/text%3E%3C/svg%3E">
 <link rel="stylesheet" href="/static/style.css?v=__V__">
 <link rel="stylesheet" href="/static/ziwei.css?v=__V__">
@@ -35,9 +35,15 @@
 </svg>
 
 <header class="masthead">
-  <div class="brand">
-    <span class="brand-mark">子牙品命</span>
-    <span class="brand-sub">紫微斗数 · 十二宫排盘</span>
+  <div class="masthead-bar">
+    <div class="brand">
+      <span class="brand-mark">子牙品命</span>
+      <span class="brand-seal">钦天历算</span>
+    </div>
+    <nav class="sys-nav" aria-label="命理体系切换">
+      <a class="sys-tab" href="/">子平八字</a>
+      <a class="sys-tab active" href="/ziwei">紫微斗数</a>
+    </nav>
   </div>
 </header>
 
@@ -128,42 +134,83 @@
   </div>
 
   <div class="hero-copy">
-    <p class="eyebrow">紫微斗数 · 定朔定气排盘</p>
+    <p class="eyebrow">紫微斗数 · 定朔定气十二宫排盘</p>
     <h1 class="hero-title">
       <span class="t-gold">十二宫，</span>
       <span class="t-plain">各安其位</span>
     </h1>
     <div class="rule-diamond"><i></i></div>
     <p class="hero-sub">
-      以农历为纲，以五行局为尺<br>
-      为你排一张星曜落宫分明的命盘
+      以定朔为纲，以五行局为尺<br>
+      十四主星明暗分毫 · 一码同步开启紫微与八字双盘
     </p>
 
     <div class="trust">
-      <span><b>◷</b> 约 10 秒</span>
-      <span><b>◈</b> 完全免费</span>
-      <span><b>⛨</b> 不留存生日</span>
+      <span><b>◈</b> 一码双盘（紫微＋八字）</span>
+      <span><b>◷</b> 实时天文定朔</span>
+      <span><b>⛨</b> 专属绑定 · 随时回看</span>
     </div>
 
     <div class="hero-cta">
-      <button type="button" class="btn-primary" id="go-form">开始排盘</button>
-      <a class="btn-outline" href="#method">了解体系</a>
+      <button type="button" class="btn-primary" id="go-form">凭码启盘</button>
+      <a class="btn-outline" href="#vault">查看内含详析</a>
     </div>
-    <p class="hero-cross">
-      想看子平八字？<a href="/">回到八字排盘 →</a>
-    </p>
+  </div>
+</section>
+
+<!-- ── 价值纵览：一码解锁四重深研 ────────────────────────── -->
+<section class="panel vault-panel" id="vault">
+  <p class="vault-kicker">一 码 专 属 权 益 · 双 盘 互 证</p>
+  <h2 class="big">凭兑换密码开启，完整呈现十二宫星曜推演</h2>
+  <p class="lede">
+    不同于粗略查表的普通排盘工具：同一枚密码绑定你的专属生辰，
+    <strong>同时解锁紫微斗数与子平八字两套完整体系</strong>，随时凭原密码回看。
+  </p>
+  <div class="vault-grid">
+    <div class="vault-item">
+      <span class="v-num">壹</span>
+      <h3>十二宫全星＋庙旺利陷</h3>
+      <p>实时解算月亮黄经定朔置闰，十四主星明暗亮度、生年四化与三方四正点击即览。</p>
+    </div>
+    <div class="vault-item">
+      <span class="v-num">贰</span>
+      <h3>六维评分与星曜依据</h3>
+      <p>事业、财富、情感、健康、人际与心性福分六维雷达，逐条给出星曜与吉煞扣分依据。</p>
+    </div>
+    <div class="vault-item">
+      <span class="v-num">叁</span>
+      <h3>十年大限与近三年流年</h3>
+      <p>自动排定十年大限、流年宫、小限与大限流年四化落宫，提前看清顺逆起伏节点。</p>
+    </div>
+    <div class="vault-item">
+      <span class="v-num">肆</span>
+      <h3>格局识别与精批通道</h3>
+      <p>自动检出机月同梁、杀破狼等常见格局与待定分水岭，一键衔接真人命理师深度精批。</p>
+    </div>
   </div>
 </section>
 
 <!-- ── 排盘表单。字段与八字页完全一致，多两处流派选项 ────────── -->
-<section id="intake" class="panel">
-  <h2 class="big">排一张你的紫微盘</h2>
+<section id="intake" class="panel intake-panel">
+  <h2 class="big">输入密码 · 启专属紫微盘</h2>
   <p class="lede">
-    农历按定朔定气实时推算，不用查表；十四主星带庙旺利陷，
-    四化落宫与大限小限一并排出。<strong>排盘免费，不限次数。</strong>
+    农历按定朔定气实时推算，十四主星带庙旺利陷，四化落宫与大限小限一并排出。
+    <strong>一个密码仅限排测一人，绑定后紫微与八字两页通用。</strong>
   </p>
 
   <form id="birth-form">
+    <div class="code-gate" id="code-gate">
+      <label class="field code-field">
+        <span class="code-label">专属兑换密码 <em>一码绑一人 · 双盘通用</em></span>
+        <input type="text" id="redeem-code" name="code" autocomplete="off"
+               spellcheck="false" placeholder="输入密码，如 ZY-7K3M-9P2Q" required>
+      </label>
+      <p class="code-help">
+        首次排盘即绑定该生辰，后续凭原密码可随时重看紫微与八字两套盘。
+        还没有密码？可于店铺获取，或添微信号 <b class="js-wx-id">ziyapinming</b>
+        <button type="button" class="link-copy js-copy-wx">复制微信号</button>
+      </p>
+    </div>
     <!-- 生日不用 <input type="date">：安卓的原生日历只能按月翻页，没有直接
          选年份的入口，填一个几十年前的日期要翻几百次。年份改成数字键盘直接打，
          月日用短下拉。详见 common.js 里 initBirthDate 的说明。 -->
@@ -246,7 +293,7 @@
       </label>
     </details>
 
-    <button type="submit" class="btn-primary">排 盘</button>
+    <button type="submit" class="btn-primary">启 盘 推 演</button>
     <p class="form-error" id="form-error" hidden></p>
   </form>
 </section>
@@ -415,10 +462,11 @@
     </div>
 
     <div class="wechat-card">
+      <div class="wx-crest">一 对 一 真 人 精 批</div>
       <img class="qr" id="wx-qr" alt="微信二维码" hidden>
       <div class="wx-id-row">
         <span class="wx-label">微信号</span>
-        <code id="wx-id">…</code>
+        <code id="wx-id">ziyapinming</code>
         <button class="btn-copy" id="copy-wx">复制</button>
       </div>
       <p class="wx-hint" id="wx-hint"></p>

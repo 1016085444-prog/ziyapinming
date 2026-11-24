@@ -1459,3 +1459,300 @@ footer {
   .ring, .taiji-spin, .twinkle { animation: none; }
   .twinkle { opacity: .7; }
 }
+
+
+/* =====================================================================
+   钦天监 · 浑天星穹视觉升级层（壮观 · 精致 · 高深 · 一码启双盘）
+   ===================================================================== */
+
+body {
+  background:
+    radial-gradient(125% 68% at 50% -18%, rgba(214,173,88,.16), transparent 58%),
+    radial-gradient(70% 50% at 88% 18%, rgba(76,125,180,.10), transparent 62%),
+    radial-gradient(85% 60% at 12% 96%, rgba(182,132,62,.08), transparent 66%),
+    linear-gradient(180deg, #090C13 0%, #05060A 72%, #07090F 100%);
+}
+
+main, .masthead { max-width: 780px; }
+
+.ring {
+  opacity: .075;
+  filter: drop-shadow(0 0 18px rgba(205,163,73,.16));
+}
+
+/* 顶部导航栏：品牌铭牌 + 双体系切换 */
+.masthead { padding: 1.7rem 1rem 1.2rem; }
+.masthead-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid rgba(205,163,73,.14);
+}
+.brand-seal {
+  font-family: var(--serif);
+  font-size: .72rem;
+  letter-spacing: .22em;
+  color: var(--gold-lit);
+  border: 1px solid rgba(205,163,73,.38);
+  background: linear-gradient(180deg, rgba(205,163,73,.14), rgba(205,163,73,.03));
+  padding: .16rem .55rem .16rem .72rem;
+  border-radius: 4px;
+}
+.sys-nav {
+  display: inline-flex;
+  gap: .35rem;
+  padding: .24rem;
+  background: rgba(18,22,31,.82);
+  border: 1px solid rgba(205,163,73,.2);
+  border-radius: 999px;
+  backdrop-filter: blur(8px);
+}
+.sys-tab {
+  text-decoration: none;
+  font-family: var(--serif);
+  font-size: .84rem;
+  letter-spacing: .12em;
+  color: var(--muted);
+  padding: .36rem .95rem;
+  border-radius: 999px;
+  transition: color .25s var(--ease), background .25s var(--ease), box-shadow .25s var(--ease);
+}
+.sys-tab:hover { color: var(--text); }
+.sys-tab.active {
+  color: #120F0A;
+  font-weight: 700;
+  background: linear-gradient(160deg, #F3DFA8, #CFA34B 62%, #A67E32);
+  box-shadow: 0 4px 16px rgba(205,163,73,.32);
+}
+
+/* 面板升级：黑曜石微光玻璃＋鎏金顶线＋深邃立体投影 */
+.panel {
+  position: relative;
+  background:
+    radial-gradient(110% 80% at 50% 0%, rgba(205,163,73,.055), transparent 58%),
+    linear-gradient(180deg, rgba(21,25,35,.92) 0%, rgba(14,17,24,.94) 100%);
+  border: 1px solid rgba(205,163,73,.19);
+  box-shadow:
+    inset 0 1px 0 rgba(232,206,138,.18),
+    0 22px 54px rgba(0,0,0,.48);
+}
+.panel::before {
+  content: "";
+  position: absolute;
+  top: -1px; left: 16%; right: 16%;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(232,206,138,.65), transparent);
+  pointer-events: none;
+}
+
+/* 主按钮：鎏金拉丝质感 + 微光扫过 */
+.btn-primary {
+  position: relative;
+  overflow: hidden;
+  background: linear-gradient(160deg, #F4DFAA 0%, #D4A94F 52%, #A67B2F 100%);
+  color: #141008;
+  font-family: var(--serif);
+  font-weight: 700;
+  letter-spacing: .24em;
+  box-shadow:
+    inset 0 1px 0 rgba(255,248,225,.65),
+    0 12px 30px rgba(205,163,73,.28);
+  transition: transform .22s var(--ease), box-shadow .25s var(--ease), filter .25s;
+}
+.btn-primary:hover {
+  transform: translateY(-1px);
+  filter: brightness(1.05);
+  box-shadow:
+    inset 0 1px 0 rgba(255,248,225,.8),
+    0 16px 38px rgba(205,163,73,.38);
+}
+.btn-outline {
+  border-color: rgba(205,163,73,.35);
+  color: var(--gold-lit);
+  background: rgba(205,163,73,.04);
+}
+.btn-outline:hover {
+  background: rgba(205,163,73,.12);
+  border-color: rgba(232,206,138,.58);
+}
+
+/* 首屏光影更宏大 */
+.hero-title {
+  text-shadow: 0 10px 36px rgba(0,0,0,.65);
+}
+.trust span {
+  background: rgba(18,22,31,.65);
+  border: 1px solid rgba(205,163,73,.18);
+  padding: .28rem .72rem;
+  border-radius: 999px;
+}
+
+/* 四重深研价值卡（强化购买欲望） */
+.vault-kicker {
+  font-size: .74rem;
+  letter-spacing: .34em;
+  color: var(--gold);
+  margin: 0 0 .5rem;
+}
+.vault-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: .9rem;
+  margin-top: 1.35rem;
+}
+.vault-item {
+  position: relative;
+  padding: 1.15rem 1.2rem 1.15rem 1.25rem;
+  border-radius: 14px;
+  background:
+    radial-gradient(90% 90% at 100% 0%, rgba(205,163,73,.07), transparent 65%),
+    rgba(9,11,17,.68);
+  border: 1px solid rgba(205,163,73,.18);
+  transition: border-color .28s var(--ease), transform .28s var(--ease);
+}
+.vault-item:hover {
+  border-color: rgba(232,206,138,.42);
+  transform: translateY(-2px);
+}
+.v-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  font-family: var(--serif);
+  font-size: .82rem;
+  color: var(--gold-lit);
+  border: 1px solid rgba(205,163,73,.42);
+  background: rgba(205,163,73,.1);
+  margin-bottom: .62rem;
+}
+.vault-item h3 {
+  margin: 0 0 .35rem;
+  font-family: var(--serif);
+  font-size: 1.04rem;
+  font-weight: 700;
+  color: var(--text);
+  letter-spacing: .04em;
+}
+.vault-item p {
+  margin: 0;
+  font-size: .83rem;
+  line-height: 1.72;
+  color: var(--muted);
+}
+
+/* 专属兑换密码鎏金铭牌 */
+.code-gate {
+  margin: 0 0 1.25rem;
+  padding: 1.15rem 1.15rem 1rem;
+  border-radius: 14px;
+  background:
+    radial-gradient(100% 100% at 0% 0%, rgba(205,163,73,.14), transparent 65%),
+    rgba(10,12,18,.82);
+  border: 1px solid rgba(205,163,73,.44);
+  box-shadow: inset 0 0 24px rgba(205,163,73,.06);
+}
+.code-field { margin: 0 !important; }
+.code-label {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: .6rem;
+  color: var(--gold-lit) !important;
+  font-family: var(--serif);
+  font-size: .92rem !important;
+  letter-spacing: .08em;
+}
+.code-label em {
+  font-style: normal;
+  font-family: var(--sans);
+  font-size: .74rem;
+  color: var(--muted);
+  letter-spacing: .04em;
+}
+#redeem-code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: .96rem;
+  letter-spacing: .12em;
+  color: var(--gold-lit);
+  background: rgba(6,8,12,.9);
+  border: 1px solid rgba(205,163,73,.42);
+  padding: .82rem .95rem;
+}
+#redeem-code::placeholder {
+  font-family: var(--sans);
+  letter-spacing: .04em;
+  font-size: .88rem;
+  color: rgba(139,135,120,.72);
+}
+#redeem-code:focus {
+  border-color: var(--gold-lit);
+  box-shadow: 0 0 0 3px rgba(205,163,73,.18);
+}
+.code-help {
+  margin: .72rem 0 0;
+  font-size: .78rem;
+  line-height: 1.72;
+  color: var(--muted);
+}
+.code-help b { color: var(--gold-lit); font-weight: 600; letter-spacing: .04em; }
+.link-copy {
+  background: rgba(205,163,73,.12);
+  border: 1px solid rgba(205,163,73,.36);
+  color: var(--gold-lit);
+  border-radius: 6px;
+  padding: .12rem .52rem;
+  margin-left: .35rem;
+  font-size: .74rem;
+  font-family: inherit;
+  cursor: pointer;
+}
+.link-copy:hover { background: rgba(205,163,73,.22); }
+
+/* 底部微信号 ziyapinming 尊享名片升级 */
+.wechat-card {
+  position: relative;
+  background:
+    radial-gradient(95% 75% at 50% 0%, rgba(205,163,73,.15), transparent 68%),
+    linear-gradient(180deg, rgba(16,20,29,.96), rgba(9,11,16,.98));
+  border: 1px solid rgba(205,163,73,.45);
+  box-shadow:
+    inset 0 0 0 4px rgba(10,12,18,.6),
+    inset 0 0 0 5px rgba(205,163,73,.16),
+    0 18px 42px rgba(0,0,0,.5);
+  padding: 1.7rem 1.4rem 1.5rem;
+}
+.wx-crest {
+  display: inline-block;
+  font-family: var(--serif);
+  font-size: .74rem;
+  letter-spacing: .3em;
+  color: var(--gold-lit);
+  border: 1px solid rgba(205,163,73,.38);
+  padding: .24rem .95rem .24rem 1.15rem;
+  border-radius: 999px;
+  background: rgba(205,163,73,.08);
+  margin-bottom: 1rem;
+}
+#wx-id {
+  font-size: 1.16rem;
+  letter-spacing: .12em;
+  color: var(--gold-lit);
+}
+.btn-copy {
+  background: linear-gradient(160deg, rgba(232,206,138,.22), rgba(205,163,73,.1));
+  border-color: rgba(232,206,138,.52);
+  color: var(--gold-lit);
+}
+.btn-copy:hover { background: rgba(205,163,73,.28); }
+
+@media (min-width: 620px) {
+  .vault-grid { grid-template-columns: 1fr 1fr; gap: 1rem; }
+  .hero { min-height: 72vh; }
+  .hero-art { right: -4%; width: 64%; }
+}

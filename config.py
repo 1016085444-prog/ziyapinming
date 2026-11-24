@@ -1,8 +1,8 @@
 """站点配置 —— 上线前你需要改的东西基本都在这个文件里。
 
-私域引流模式：排盘完全免费且无成本（纯本地计算），命盘只给「骨架」，
-真正值钱的解读引导到微信上由真人完成。所以微信号填错 = 整个漏斗断掉，
-这是全站最要紧的一个常量。
+一密一人模式（腾讯云部署）：
+  - 兑换密码（卡密）通过 SQLite 落盘存储，一个密码绑定一个生辰，八字与紫微互通；
+  - 排盘结果页底部引导添加微信号 ziyapinming，承接高客单真人精批。
 """
 
 from __future__ import annotations
@@ -14,39 +14,36 @@ BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 
 # ── 站点地址 ────────────────────────────────────────────────
-#
-# 推广二维码与海报都指向这里，所以它只能有一处定义。以前这个地址硬写在
-# tools/make_qr.py 里，换地址就得改两处，而漏改的那一处正是印出去的那张码。
-#
-# 关于「每次更新是不是都要换网址」：云托管的默认域名是**按服务固定**的，
-# 发新版本不会改地址。地址变过一次，是因为当时新建了一个服务，不是因为部署。
-# 所以想让二维码一次印好永久可用：
-#
-#   1. 以后只「发新版本」，不要新建服务——同一个服务地址永远不变；
-#   2. 要彻底不依赖平台域名，就绑一个自己的域名填到这里。之后即便重建服务、
-#      甚至整个换平台，二维码都不用重印。这是唯一一劳永逸的做法。
-#
-# 改完这里，重新跑一次 `.venv/bin/python tools/make_qr.py` 即可更新二维码。
 SITE_URL = os.environ.get(
     "SITE_URL",
     "https://ziyapinmingzw-288718-10-1460102831.sh.run.tcloudbase.com",
 ).rstrip("/")
 
-# ── 微信引流（必改）──────────────────────────────────────────
-#
-# 1. WECHAT_ID 填你的微信号（不是昵称——昵称搜不到人）。
-# 2. 把你的二维码图片存成 static/wechat-qr.png，尺寸建议 ≥ 430×430。
-#    没放图也能跑，页面会自动只显示微信号和复制按钮。
+# ── 微信引流 ────────────────────────────────────────────────
+# 微信号（不是昵称——昵称搜不到人）。可通过环境变量 WECHAT_ID 覆盖。
+WECHAT_ID = os.environ.get("WECHAT_ID", "ziyapinming")
 
-WECHAT_ID = os.environ.get("WECHAT_ID", "JHan20001230")
-
-# 加微信后你承诺给什么。要具体——「了解更多」这类空话没人加。
+# 加微信后的具体承接说明
 WECHAT_OFFER = os.environ.get(
     "WECHAT_OFFER",
-    "加我微信，发送本页命盘截图，我会回一份针对你这张盘的精批要点。",
+    "添加微信 ziyapinming，发来本页命盘截图与你最想问的事，由命理师一对一深度精批。",
 )
 
 WECHAT_QR_FILE = "wechat-qr.png"
+
+# ── 一次性兑换密码（卡密）配置 ───────────────────────────────
+# 默认开启卡密核销（设为 0/false 可临时关闭做免密调试）
+REQUIRE_CODE = os.environ.get("REQUIRE_CODE", "1").strip().lower() not in (
+    "0", "false", "no", "off",
+)
+
+# SQLite 卡密数据库路径（腾讯云部署建议指向独立数据目录如 /var/lib/ziyapinming/codes.db）
+CODES_DB_PATH = Path(
+    os.environ.get("CODES_DB_PATH", str(BASE_DIR / "data" / "codes.db"))
+)
+
+# 卡密管理后台口令（只走环境变量，切勿写死进代码或 GitHub）
+ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "").strip()
 
 
 def wechat_qr_url():
@@ -63,4 +60,5 @@ def public_config():
         "wechat_id": WECHAT_ID,
         "wechat_offer": WECHAT_OFFER,
         "wechat_qr": wechat_qr_url(),
+        "require_code": REQUIRE_CODE,
     }

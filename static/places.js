@@ -290,13 +290,14 @@ function selectedPlace() {
 // 生辰只走 URL 参数，不落任何存储：本站承诺不留存生日，这一条不能因为
 // 图方便而破例（sessionStorage 也算留存）。
 
-/** 把表单读出的生辰拼成查询串。 */
+/** 把表单读出的生辰拼成查询串（同时携带兑换码，双盘切换免重填）。 */
 function birthQuery(p) {
   const q = new URLSearchParams({
     y: p.year, m: p.month, d: p.day, h: p.hour, mi: p.minute,
     g: p.gender, place: p.place,
     tst: p.tst ? 1 : 0, lz: p.latezi ? 1 : 0, dst: p.dst ? 1 : 0,
   });
+  if (p.code) q.set('code', p.code);
   return '?' + q.toString();
 }
 
@@ -317,6 +318,7 @@ function readBirthQuery() {
     year: y, month: m, day: d, hour: h, minute: mi, gender: g,
     tst: flag('tst'), latezi: flag('lz'), dst: flag('dst'),
     place: q.get('place') || '',
+    code: (q.get('code') || '').trim(),
   };
 }
 

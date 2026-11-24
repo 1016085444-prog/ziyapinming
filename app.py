@@ -1,30 +1,31 @@
-"""子牙品命 —— 八字排盘 Web 服务。
+"""子牙品命 —— 八字与紫微双盘排盘 Web 服务（一密一人核销版）。
 
-商业模型（私域引流）：
+商业模型：
+    小红书/发卡渠道自动发货（一次性密码）
+      ──► 网站凭密码排盘（一密绑一人，八字＋紫微双盘通用，随时回看）
+      ──► 底部微信号 ziyapinming 承接真人深度精批
 
-    免费排盘 ──► 命盘只给骨架 ──► 引导加微信 ──► 真人精批成交
-
-排盘是纯本地计算，没有任何外部调用，所以：**没有可变成本，就不需要
-会话、额度、防刷、Redis。** 有人拿脚本狂刷排盘，只花你的 CPU。
-
-这也是这版比 AI 对话版简单一大截的原因——服务端不持有任何用户状态，
-命盘算完即返回，进程重启不丢东西。
+排盘纯本地计算，零大模型 API 费用；密码核销使用标准库 SQLite 落盘，
+腾讯云单机部署即天然持久化，重启不丢数据。
 """
 
 from __future__ import annotations
 
+import hmac
 import time
+from typing import Optional
 
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import HTMLResponse
+from fastapi import FastAPI, Header, HTTPException, Query
+from fastapi.responses import HTMLResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+import codes
 import config
 from bazi.analysis import analyze, year_outlook
+from bazi.chart import build_chart
 from bazi.inquiry import open_questions
 from bazi.scoring import score_chart
-from bazi.chart import build_chart
 
 from ziwei.analysis import analyze as zw_analyze, year_outlook as zw_year_outlook
 from ziwei.chart import build_chart as zw_build_chart
@@ -41,29 +42,65 @@ class BirthInput(BaseModel):
     hour: int = Field(..., ge=0, le=23)
     minute: int = Field(0, ge=0, le=59)
     gender: str = Field("male", pattern="^(male|female)$")
-    # 纬度不参与任何推算（真太阳时只用经度），故不作为入参
     longitude: float = Field(116.4074, ge=-180, le=180)
     tz_offset: float = Field(8.0, ge=-12, le=14)
     use_true_solar_time: bool = True
     late_zi_shifts_day: bool = True
     adjust_china_dst: bool = True
+    code: str = Field("", max_length=64)
 
 
 class ZiweiInput(BirthInput):
-    """紫微斗数的入参：同一个生辰，多两处流派选项。
-
-    这两处在八字里不存在——八字以立春换年、以节换月，根本用不到农历，
-    也就没有闰月归属的问题。
-    """
-    # 紫微主流以正月初一换年；少数流派用立春，与八字同口径
+    """紫微斗数的入参：同一个生辰，多两处流派选项。"""
     year_boundary: str = Field("lunar", pattern="^(lunar|lichun)$")
-    # 闰月生人按本月还是按下月定宫
     leap_month_rule: str = Field("current", pattern="^(current|split)$")
+
+
+class GenerateCodesInput(BaseModel):
+    count: int = Field(50, ge=1, le=2000)
+    prefix: str = Field("ZY", max_length=8)
+    note: str = Field("", max_length=80)
+
+
+class ToggleCodeInput(BaseModel):
+    disabled: bool
+
+
+def _require_valid_code(payload: BirthInput) -> Optional[dict]:
+    """核验并绑定兑换密码（一密绑一人，八字与紫微通用）。"""
+    if not config.REQUIRE_CODE:
+        return None
+    key, summary = codes.birth_fingerprint(
+        payload.year, payload.month, payload.day,
+        payload.hour, payload.minute,
+        payload.gender, payload.longitude, payload.tz_offset,
+        payload.use_true_solar_time, payload.late_zi_shifts_day,
+        payload.adjust_china_dst,
+    )
+    ok, state_tag, msg = codes.get_store().verify_and_bind(payload.code, key, summary)
+    if not ok:
+        raise HTTPException(403, msg)
+    return {
+        "code": codes.normalize_code(payload.code),
+        "state": state_tag,
+        "message": msg,
+    }
+
+
+def _require_admin(x_admin_token: Optional[str]) -> None:
+    expected = config.ADMIN_TOKEN
+    if not expected:
+        raise HTTPException(
+            503,
+            "管理后台未启用：请先在服务器环境变量中设置 ADMIN_TOKEN 后重启服务",
+        )
+    if not x_admin_token or not hmac.compare_digest(x_admin_token.strip(), expected):
+        raise HTTPException(401, "管理口令不正确")
 
 
 @app.post("/api/chart")
 def api_chart(payload: BirthInput):
-    """排盘 + 命理分析。纯函数：同样的输入永远得到同样的输出，不留状态。"""
+    """排盘 + 命理分析。先验历法合法性，再核销绑定密码，避免误填非法日期浪费密码。"""
     try:
         chart = build_chart(
             payload.year, payload.month, payload.day,
@@ -78,6 +115,7 @@ def api_chart(payload: BirthInput):
     except ValueError as exc:
         raise HTTPException(400, str(exc))
 
+    code_info = _require_valid_code(payload)
     this_year = time.localtime().tm_year
     return {
         "chart": chart.to_dict(),
@@ -88,16 +126,13 @@ def api_chart(payload: BirthInput):
             year_outlook(chart, y)
             for y in (this_year, this_year + 1, this_year + 2)
         ],
+        "code_info": code_info,
     }
 
 
 @app.post("/api/ziwei")
 def api_ziwei(payload: ZiweiInput):
-    """紫微斗数排盘 + 分析。同样是纯函数，不留状态。
-
-    与 /api/chart 是两条独立的路径而不是一个带 system 参数的接口：两套体系
-    的输出结构差得远（四柱 vs 十二宫），塞进一个响应里只会让前端两头都别扭。
-    """
+    """紫微斗数排盘 + 分析。同一密码与八字页共用绑定生辰。"""
     try:
         chart = zw_build_chart(
             payload.year, payload.month, payload.day,
@@ -114,6 +149,7 @@ def api_ziwei(payload: ZiweiInput):
     except ValueError as exc:
         raise HTTPException(400, str(exc))
 
+    code_info = _require_valid_code(payload)
     this_year = time.localtime().tm_year
     return {
         "chart": chart.to_dict(),
@@ -124,27 +160,108 @@ def api_ziwei(payload: ZiweiInput):
             zw_year_outlook(chart, y)
             for y in (this_year, this_year + 1, this_year + 2)
         ],
+        "code_info": code_info,
     }
 
 
 @app.get("/api/config")
 def api_config():
-    """前端启动时拉一次，拿微信号与二维码地址。"""
+    """前端启动时拉一次，拿微信号、二维码与是否启用兑换码。"""
     return config.public_config()
 
 
-_ASSETS = ("style.css", "app.js", "places.js", "ziwei.css", "ziwei.js")
+# ── 卡密管理后台接口（需 X-Admin-Token） ─────────────────────
+
+@app.get("/api/admin/stats")
+def admin_stats(x_admin_token: Optional[str] = Header(None)):
+    _require_admin(x_admin_token)
+    store = codes.get_store()
+    return {
+        "stats": store.stats(),
+        "storage": store.storage_info(),
+        "require_code": config.REQUIRE_CODE,
+    }
+
+
+@app.get("/api/admin/codes")
+def admin_list_codes(
+    status: Optional[str] = Query(None),
+    q: Optional[str] = Query(None),
+    limit: int = Query(200, ge=1, le=1000),
+    x_admin_token: Optional[str] = Header(None),
+):
+    _require_admin(x_admin_token)
+    store = codes.get_store()
+    return {
+        "stats": store.stats(),
+        "items": store.list_codes(status=status, q=q, limit=limit),
+    }
+
+
+@app.post("/api/admin/codes")
+def admin_generate_codes(
+    payload: GenerateCodesInput,
+    x_admin_token: Optional[str] = Header(None),
+):
+    _require_admin(x_admin_token)
+    store = codes.get_store()
+    created = store.generate(
+        count=payload.count, prefix=payload.prefix, note=payload.note
+    )
+    return {
+        "created": created,
+        "count": len(created),
+        "stats": store.stats(),
+    }
+
+
+@app.get("/api/admin/codes/export", response_class=PlainTextResponse)
+def admin_export_unused(
+    note: Optional[str] = Query(None),
+    x_admin_token: Optional[str] = Header(None),
+):
+    """导出未使用卡密纯文本（一行一个），可直接粘贴进自动发货卡密库。"""
+    _require_admin(x_admin_token)
+    items = codes.get_store().list_codes(status="unused", q=note, limit=1000)
+    lines = [it["code"] for it in items]
+    return PlainTextResponse(
+        "\n".join(lines),
+        headers={"Content-Disposition": 'attachment; filename="ziyapinming-codes.txt"'},
+    )
+
+
+@app.post("/api/admin/codes/{code}/toggle")
+def admin_toggle_code(
+    code: str,
+    payload: ToggleCodeInput,
+    x_admin_token: Optional[str] = Header(None),
+):
+    _require_admin(x_admin_token)
+    ok = codes.get_store().set_disabled(code, payload.disabled)
+    if not ok:
+        raise HTTPException(404, "未找到该密码")
+    return {"ok": True, "stats": codes.get_store().stats()}
+
+
+@app.post("/api/admin/codes/{code}/reset")
+def admin_reset_code(
+    code: str,
+    x_admin_token: Optional[str] = Header(None),
+):
+    """解除绑定（买家填错出生日期时客服救急用）。"""
+    _require_admin(x_admin_token)
+    ok = codes.get_store().reset_code(code)
+    if not ok:
+        raise HTTPException(404, "未找到该密码")
+    return {"ok": True, "stats": codes.get_store().stats()}
+
+
+# ── 页面与静态资源 ────────────────────────────────────────────
+
+_ASSETS = ("style.css", "common.js", "app.js", "places.js", "ziwei.css", "ziwei.js")
 
 
 def _asset_version():
-    """用静态资源的最新修改时间做版本号，注入到页面的引用里。
-
-    静态文件带 ETag 缓存，改完 CSS/JS 后老用户会卡在旧版本。加上随文件变化的
-    ?v= 参数，一改即刻生效，既不用手动维护版本串，也不必牺牲缓存。
-
-    刻意取**所有**资源的最新时间而不是各自的时间：两个页面共用 places.js，
-    分开算版本号会让「改了共用文件但没改本页 JS」的情况漏掉刷新。
-    """
     return str(int(max(
         (config.STATIC_DIR / name).stat().st_mtime for name in _ASSETS
     )))
@@ -161,14 +278,13 @@ def index():
 
 
 @app.get("/ziwei", response_class=HTMLResponse)
-def ziwei_page():
+def ziwei():
     return _page("ziwei.html")
 
 
+@app.get("/admin", response_class=HTMLResponse)
+def admin_page():
+    return _page("admin.html")
+
+
 app.mount("/static", StaticFiles(directory=str(config.STATIC_DIR)), name="static")
-
-
-if __name__ == "__main__":
-    import uvicorn
-
-    uvicorn.run(app, host="127.0.0.1", port=8000)
