@@ -33,17 +33,18 @@ WECHAT_OFFER = os.environ.get(
     "加微信发送「财富」，附上本页截图，我会回你一份针对这张盘的财运要点。",
 )
 
-# 精批的价格展示。留空则页面不显示价格，只显示「添加微信咨询」。
-# 填写示例："¥99"。注意：只写真实售价，不要写虚构的「原价」做划线对比——
+# 一对一精批的价格展示（与网站本身的售价无关）。留空则不显示价格，
+# 只显示「添加微信咨询」。填写示例："¥99"。注意：只写真实售价，不要写虚构的「原价」做划线对比——
 # 那属于虚构原价，违反《价格法》与《明码标价和禁止价格欺诈规定》。
-PREMIUM_PRICE = os.environ.get("CAIFU_PREMIUM_PRICE", "¥9.9")
+PREMIUM_PRICE = os.environ.get("CAIFU_PREMIUM_PRICE", "")
 
-# 购买渠道说明。各平台的店铺同名时，告诉用户搜这个名字即可。
-# 留空则不显示这一行。
+# 本站本身是付费商品：用户在各平台的同名店铺下单，拿到网址再来测。
+# 所以店铺名要印在「会被截图分享出去」的地方——财富金卡上和金卡下方——
+# 朋友看到截图想测，才知道去哪里买。留空则不显示。
 SHOP_NAME = os.environ.get("CAIFU_SHOP_NAME", "ziyapinming")
 SHOP_NOTE = os.environ.get(
     "CAIFU_SHOP_NOTE",
-    "各大平台搜索同名店铺「{}」即可下单".format(SHOP_NAME) if SHOP_NAME else "",
+    "朋友也想测？各大平台搜索同名店铺「{}」".format(SHOP_NAME) if SHOP_NAME else "",
 )
 
 # 二维码图片：放在 caifu/static/ 下，存在才显示

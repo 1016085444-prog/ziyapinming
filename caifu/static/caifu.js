@@ -469,7 +469,12 @@ async function loadPrice() {
       }
       $('#shop').hidden = false;
     }
-  } catch (_) { /* 价格与店铺不是必需项，拿不到就不显示 */ }
+    if (cfg.shop_name) {
+      const v = $('#vc-shop');
+      v.textContent = '测你的财富指数 · 各平台搜「' + cfg.shop_name + '」';
+      v.hidden = false;
+    }
+  } catch (_) { /* 价格与店铺名不是必需项，拿不到就不显示 */ }
 }
 
 document.addEventListener('DOMContentLoaded', () => {

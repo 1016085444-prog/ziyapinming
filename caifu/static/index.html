@@ -108,7 +108,7 @@
   <button type="button" class="btn-gold btn-xl" id="go-form">
     <span>立即测算财富指数</span>
   </button>
-  <p class="hero-note">免费测算 · 约 30 秒 · 生辰不留存</p>
+  <p class="hero-note">约 30 秒出结果 · 生辰不留存</p>
 
   <ul class="feature-row">
     <li><b>指</b><span>财富指数<br><em>全盘定位</em></span></li>
@@ -254,8 +254,13 @@
       <span class="vc-no" id="vc-no">NO. ———— · —— · ——</span>
       <span class="vc-seal" aria-hidden="true">財</span>
     </div>
+    <div class="vc-shop" id="vc-shop" hidden></div>
   </div>
-  <p class="shot-hint">截图保存你的财富金卡，分享给朋友一起测</p>
+  <p class="shot-hint">长按或截图，保存你的财富金卡</p>
+  <div class="shop" id="shop" hidden>
+    <p class="shop-note" id="shop-note"></p>
+    <button type="button" class="shop-name" id="shop-name"></button>
+  </div>
 
   <div class="birth-meta" id="birth-meta"></div>
   <p class="boundary" id="boundary" hidden></p>
@@ -339,10 +344,6 @@
     </ul>
 
     <div class="pm-price" id="pm-price" hidden></div>
-    <div class="shop" id="shop" hidden>
-      <p class="shop-note" id="shop-note"></p>
-      <button type="button" class="shop-name" id="shop-name"></button>
-    </div>
     <button type="button" class="btn-gold btn-xl btn-block" id="unlock">
       <span>添加微信 · 解锁完整精批</span>
     </button>
