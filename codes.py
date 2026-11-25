@@ -14,6 +14,7 @@ from __future__ import annotations
 import os
 import re
 import secrets
+import threading
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
@@ -731,6 +732,24 @@ class TcbDocCodeStore:
             "label": f"云开发文档型数据库（{self.env_id} / {self.collection}）",
             "warning": "",
         }
+
+
+_CLAIM_LOCK = threading.Lock()
+
+
+def claim_for_order(store, order_id: str) -> Tuple[str, bool]:
+    """凭订单号领码：同一订单号永远拿到同一个码。返回 (码, 是否本次新发)。
+
+    订单号记在码的备注里（「订单 XXX」），后台按备注就能对账。
+    先查后发要整体加锁，否则同一订单号并发请求会领出多个码。
+    云托管实例上限设为 1，进程内锁就够；以后放开多实例要换成数据库级的唯一约束。
+    """
+    note = f"订单 {order_id}"
+    with _CLAIM_LOCK:
+        for row in store.list_codes(q=order_id, limit=50):
+            if (row.get("note") or "").strip().upper() == note.upper():
+                return row["code"], False
+        return store.generate(count=1, note=note)[0], True
 
 
 def _mysql_env() -> Optional[Tuple[str, int, str, str, str]]:

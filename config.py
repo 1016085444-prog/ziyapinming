@@ -45,6 +45,9 @@ CODES_DB_PATH = Path(
 # 卡密管理后台口令（只走环境变量，切勿写死进代码或 GitHub）
 ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "").strip()
 
+# 凭订单号领码页（/claim）对订单号的格式检查，挡掉明显乱填的。
+ORDER_ID_PATTERN = os.environ.get("ORDER_ID_PATTERN", r"^[A-Za-z0-9]{10,32}$")
+
 
 def wechat_qr_url():
     """二维码存在才返回地址，否则返回 None（前端据此隐藏图片位）。"""

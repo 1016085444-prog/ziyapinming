@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import hmac
+import re
 import time
 from typing import Optional
 
@@ -60,6 +61,10 @@ class GenerateCodesInput(BaseModel):
     count: int = Field(50, ge=1, le=2000)
     prefix: str = Field("ZY", max_length=8)
     note: str = Field("", max_length=80)
+
+
+class ClaimInput(BaseModel):
+    order_id: str = Field(..., max_length=64)
 
 
 class ToggleCodeInput(BaseModel):
@@ -172,6 +177,15 @@ def api_config():
 
 # ── 卡密管理后台接口（需 X-Admin-Token） ─────────────────────
 
+@app.post("/api/claim")
+def claim(payload: ClaimInput):
+    order_id = re.sub(r"\s+", "", payload.order_id)
+    if not re.fullmatch(config.ORDER_ID_PATTERN, order_id):
+        raise HTTPException(400, "订单号格式不对，请从订单详情里复制完整的订单号")
+    code, new = codes.claim_for_order(codes.get_store(), order_id)
+    return {"code": code, "new": new}
+
+
 @app.get("/api/admin/stats")
 def admin_stats(x_admin_token: Optional[str] = Header(None)):
     _require_admin(x_admin_token)
@@ -280,6 +294,11 @@ def index():
 @app.get("/ziwei", response_class=HTMLResponse)
 def ziwei():
     return _page("ziwei.html")
+
+
+@app.get("/claim", response_class=HTMLResponse)
+def claim_page():
+    return _page("claim.html")
 
 
 @app.get("/admin", response_class=HTMLResponse)

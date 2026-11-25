@@ -79,3 +79,32 @@ class TestCodeStore(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestClaimForOrder(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.store = codes.CodeStore(Path(self._tmp.name) / "codes.db")
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def test_same_order_same_code(self):
+        c1, new1 = codes.claim_for_order(self.store, "P123456789012345678")
+        c2, new2 = codes.claim_for_order(self.store, "P123456789012345678")
+        self.assertEqual(c1, c2)
+        self.assertTrue(new1)
+        self.assertFalse(new2)
+        self.assertEqual(self.store.stats()["total"], 1)
+
+    def test_order_id_prefix_does_not_collide(self):
+        c1, _ = codes.claim_for_order(self.store, "P1234567890")
+        c2, _ = codes.claim_for_order(self.store, "P12345678901")
+        self.assertNotEqual(c1, c2)
+
+    def test_concurrent_claims_issue_one_code(self):
+        import concurrent.futures
+        with concurrent.futures.ThreadPoolExecutor(8) as ex:
+            got = set(ex.map(lambda _: codes.claim_for_order(self.store, "P999999999999")[0], range(16)))
+        self.assertEqual(len(got), 1)
+        self.assertEqual(self.store.stats()["total"], 1)
