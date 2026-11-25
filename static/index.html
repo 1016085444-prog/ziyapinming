@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>子牙品命 · 八字排盘与问命</title>
-<meta name="description" content="高精度八字与紫微双盘排盘：节气按太阳视黄经实时推算，时柱经真太阳时校正。一码启双盘，专属绑定随时回看。">
+<meta name="description" content="高精度八字与紫微双盘排盘：节气按太阳视黄经实时推算，时柱经真太阳时校正。八字与紫微双盘同步排出。">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%2313110F'/%3E%3Ctext x='16' y='23' font-size='20' font-family='serif' fill='%23C9A961' text-anchor='middle'%3E%E5%AD%90%3C/text%3E%3C/svg%3E">
 <link rel="stylesheet" href="/static/style.css?v=__V__">
 </head>
@@ -205,17 +205,17 @@
     <div class="rule-diamond"><i></i></div>
     <p class="hero-sub">
       以节气为纲，以真太阳时为尺<br>
-      穷究四柱五行消长 · 一码同步开启八字与紫微双盘
+      穷究四柱五行消长 · 八字与紫微双盘同步排出
     </p>
 
     <div class="trust">
-      <span><b>◈</b> 一码双盘（八字＋紫微）</span>
+      <span><b>◈</b> 双盘（八字＋紫微）</span>
       <span><b>◷</b> 秒级天文历算</span>
-      <span><b>⛨</b> 专属绑定 · 随时回看</span>
+      <span><b>⛨</b> 不留存生日</span>
     </div>
 
     <div class="hero-cta">
-      <button type="button" class="btn-primary" id="go-form">凭码启盘</button>
+      <button type="button" class="btn-primary" id="go-form">开始排盘</button>
       <a class="btn-outline" href="#vault">查看内含详析</a>
     </div>
   </div>
@@ -223,11 +223,11 @@
 
 <!-- ── 价值纵览：让访客一眼看清一码解锁的深厚内容 ──────────── -->
 <section class="panel vault-panel" id="vault">
-  <p class="vault-kicker">一 码 专 属 权 益 · 双 盘 互 证</p>
-  <h2 class="big">凭兑换密码开启，完整呈现四重命理推演</h2>
+  <p class="vault-kicker">双 盘 互 证</p>
+  <h2 class="big">完整呈现四重命理推演</h2>
   <p class="lede">
-    不同于市面粗略查表的免费工具：同一枚密码绑定你的专属生辰，
-    <strong>同时解锁子平八字与紫微斗数两套完整体系</strong>，随时凭原密码回看。
+    不同于市面粗略查表的免费工具：填一次生辰，
+    <strong>同时排出子平八字与紫微斗数两套完整体系</strong>。
   </p>
   <div class="vault-grid">
     <div class="vault-item">
@@ -255,25 +255,12 @@
 
 <!-- ── 排盘表单 ───────────────────────────────────────────── -->
 <section id="intake" class="panel intake-panel">
-  <h2 class="big">输入密码 · 启专属命盘</h2>
+  <h2 class="big">排一张你的命盘</h2>
   <p class="lede">
     节气按太阳视黄经实时推算，误差以秒计；时柱经真太阳时校正。
-    <strong>一个密码仅限排测一人，绑定后八字与紫微两页通用。</strong>
   </p>
 
   <form id="birth-form">
-    <div class="code-gate" id="code-gate">
-      <label class="field code-field">
-        <span class="code-label">专属兑换密码 <em>一码绑一人 · 双盘通用</em></span>
-        <input type="text" id="redeem-code" name="code" autocomplete="off"
-               spellcheck="false" placeholder="输入密码，如 ZY-7K3M-9P2Q" required>
-      </label>
-      <p class="code-help">
-        首次排盘即绑定该生辰，后续凭原密码可随时重看八字与紫微两套盘。
-        还没有密码？可于店铺获取，或添微信号 <b class="js-wx-id">ziyapinming</b>
-        <button type="button" class="link-copy js-copy-wx">复制微信号</button>
-      </p>
-    </div>
     <!-- 生日不用 <input type="date">：安卓的原生日历只能按月翻页，没有直接
          选年份的入口，填一个几十年前的日期要翻几百次。年份改成数字键盘直接打，
          月日用短下拉。详见 common.js 里 initBirthDate 的说明。 -->
