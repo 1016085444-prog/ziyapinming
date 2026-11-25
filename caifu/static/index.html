@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0A0806">
+<title>子牙财鉴 · 测一测你的财富指数</title>
+<meta name="description" content="八字 × 紫微斗数双盘合参，测算你的财富指数、财富五力、一生财运曲线与近三年财运。真太阳时校正，节气精算到秒。">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%23A8231C'/%3E%3Ctext x='16' y='23' font-size='19' font-family='serif' fill='%23F6E3A8' text-anchor='middle'%3E%E8%B2%A1%3C/text%3E%3C/svg%3E">
+<link rel="stylesheet" href="/static/caifu.css?v=__V__">
+</head>
+<body>
+
+<!-- 氛围层：暖金光晕 + 金尘。固定在视口，不随内容滚动 -->
+<div class="aura" aria-hidden="true"></div>
+<div class="dust" id="dust" aria-hidden="true"></div>
+
+<header class="top">
+  <div class="logo">
+    <span class="seal" aria-hidden="true">財</span>
+    <span class="logo-text">
+      <b>子牙财鉴</b>
+      <i>WEALTH · DESTINY</i>
+    </span>
+  </div>
+</header>
+
+<main>
+
+<div id="landing">
+
+<!-- ── 首屏 ─────────────────────────────────────────────── -->
+<section class="hero">
+  <div class="coin-wrap" aria-hidden="true">
+    <div class="coin-rays"></div>
+    <svg class="coin" viewBox="0 0 200 200">
+      <defs>
+        <linearGradient id="gFace" x1="15%" y1="8%" x2="85%" y2="92%">
+          <stop offset="0%"   stop-color="#FFF1C2"/>
+          <stop offset="22%"  stop-color="#E9C77A"/>
+          <stop offset="50%"  stop-color="#C39543"/>
+          <stop offset="74%"  stop-color="#E3BE6E"/>
+          <stop offset="100%" stop-color="#8C6326"/>
+        </linearGradient>
+        <linearGradient id="gRim" x1="85%" y1="10%" x2="15%" y2="90%">
+          <stop offset="0%"   stop-color="#FFF4CF"/>
+          <stop offset="45%"  stop-color="#B8893A"/>
+          <stop offset="100%" stop-color="#6E4C1C"/>
+        </linearGradient>
+        <linearGradient id="gInset" x1="20%" y1="10%" x2="80%" y2="90%">
+          <stop offset="0%"   stop-color="#B98B3B"/>
+          <stop offset="55%"  stop-color="#D8B163"/>
+          <stop offset="100%" stop-color="#F3DA98"/>
+        </linearGradient>
+        <linearGradient id="gShine" x1="0" y1="0" x2="1" y2="0">
+          <stop offset="0%"   stop-color="#FFFFFF" stop-opacity="0"/>
+          <stop offset="50%"  stop-color="#FFFBEA" stop-opacity=".75"/>
+          <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0"/>
+        </linearGradient>
+        <clipPath id="coinClip"><circle cx="100" cy="100" r="92"/></clipPath>
+        <filter id="emboss" x="-10%" y="-10%" width="120%" height="120%">
+          <feGaussianBlur in="SourceAlpha" stdDeviation=".6" result="b"/>
+          <feOffset in="b" dx=".8" dy="1.1" result="o"/>
+          <feComposite in="SourceGraphic" in2="o" operator="over"/>
+        </filter>
+      </defs>
+
+      <!-- 钱体：外圆 -->
+      <circle cx="100" cy="100" r="92" fill="url(#gRim)"/>
+      <circle cx="100" cy="100" r="84" fill="url(#gFace)"/>
+      <circle cx="100" cy="100" r="78" fill="none" stroke="#8C6326" stroke-opacity=".55" stroke-width="1.2"/>
+      <circle cx="100" cy="100" r="76" fill="none" stroke="#FFF1C2" stroke-opacity=".5" stroke-width=".6"/>
+
+      <!-- 内方：方孔与内郭 -->
+      <rect x="74" y="74" width="52" height="52" fill="url(#gInset)"/>
+      <rect x="80" y="80" width="40" height="40" fill="#0A0806"/>
+      <rect x="80" y="80" width="40" height="40" fill="none" stroke="#FFF1C2" stroke-opacity=".35" stroke-width=".8"/>
+
+      <!-- 钱文：上下右左 —— 招 财 进 宝 -->
+      <g class="coin-text" font-family="Songti SC, STSong, 'Noto Serif SC', serif" font-size="27"
+         font-weight="700" text-anchor="middle" dominant-baseline="central" filter="url(#emboss)">
+        <text x="100" y="47">招</text>
+        <text x="100" y="153">財</text>
+        <text x="153" y="100">進</text>
+        <text x="47"  y="100">寶</text>
+      </g>
+
+      <!-- 光泽：一道斜光扫过钱面。只裁在钱体之内 -->
+      <g clip-path="url(#coinClip)">
+        <rect class="coin-shine" x="-60" y="-40" width="46" height="280"
+              fill="url(#gShine)" transform="rotate(24 100 100)"/>
+      </g>
+    </svg>
+    <div class="coin-shadow"></div>
+  </div>
+
+  <p class="eyebrow">八字 × 紫微斗数 · 双盘合参</p>
+  <h1 class="hero-title">
+    <span class="foil">你命里的财</span>
+    <span class="plain">藏在哪一格</span>
+  </h1>
+  <div class="rule"><i></i></div>
+  <p class="hero-sub">
+    一个生辰，两套千年命理体系同时推演<br>
+    算出你的 <b>财富指数</b>、<b>财富五力</b> 与 <b>一生财运曲线</b>
+  </p>
+
+  <button type="button" class="btn-gold btn-xl" id="go-form">
+    <span>立即测算财富指数</span>
+  </button>
+  <p class="hero-note">免费测算 · 约 30 秒 · 生辰不留存</p>
+
+  <ul class="feature-row">
+    <li><b>指</b><span>财富指数<br><em>全盘定位</em></span></li>
+    <li><b>力</b><span>财富五力<br><em>正偏守创贵</em></span></li>
+    <li><b>运</b><span>一生财运<br><em>高峰在哪年</em></span></li>
+    <li><b>方</b><span>招财指南<br><em>方位与行业</em></span></li>
+  </ul>
+</section>
+
+<!-- ── 表单 ─────────────────────────────────────────────── -->
+<section class="card intake" id="intake">
+  <span class="corner tl"></span><span class="corner tr"></span>
+  <span class="corner bl"></span><span class="corner br"></span>
+
+  <h2 class="card-title">录入生辰</h2>
+  <p class="card-lede">按出生证明上的时间填写。时辰越准，财运推演越准。</p>
+
+  <form id="birth-form" autocomplete="off">
+    <label class="field">
+      <span>称呼 <em>选填 · 仅显示在你的财富金卡上，不上传</em></span>
+      <input type="text" id="nick" maxlength="8" placeholder="如：林先生">
+    </label>
+
+    <div class="field">
+      <span>出生日期（公历）</span>
+      <div class="date-group">
+        <input type="number" id="by" inputmode="numeric" autocomplete="bday-year"
+               min="1900" max="2100" step="1" placeholder="年份" required
+               aria-label="出生年份">
+        <select id="bm" aria-label="出生月份"></select>
+        <select id="bd" aria-label="出生日"></select>
+      </div>
+    </div>
+
+    <div class="field-row">
+      <label class="field">
+        <span>出生时刻</span>
+        <input type="time" name="time" value="12:00" required>
+      </label>
+      <div class="field">
+        <span>性别</span>
+        <div class="seg" role="radiogroup" aria-label="性别">
+          <label><input type="radio" name="gender" value="male" checked><i>男</i></label>
+          <label><input type="radio" name="gender" value="female"><i>女</i></label>
+        </div>
+      </div>
+    </div>
+
+    <div class="field">
+      <span>出生地 <em>用于真太阳时校正</em></span>
+      <button type="button" class="place-field" id="place-btn" aria-haspopup="dialog">
+        <span id="place-label">上海</span>
+        <i aria-hidden="true">▾</i>
+      </button>
+    </div>
+
+    <details class="advanced">
+      <summary>高级选项</summary>
+      <label class="check">
+        <input type="checkbox" name="tst" checked>
+        <span>真太阳时校正<em>按出生地经度与均时差修正时辰</em></span>
+      </label>
+      <label class="check">
+        <input type="checkbox" name="latezi" checked>
+        <span>晚子时归次日<em>23 点后出生按次日论</em></span>
+      </label>
+      <label class="check">
+        <input type="checkbox" name="dst" checked>
+        <span>自动回退夏令时<em>1986–1991 年出生证明记的是夏令时，需回拨一小时</em></span>
+      </label>
+    </details>
+
+    <button type="submit" class="btn-gold btn-xl btn-block"><span>开 启 财 富 命 盘</span></button>
+    <p class="form-error" id="form-error" hidden></p>
+    <p class="privacy">🔒 生辰只用于本次计算，服务器不保存任何记录</p>
+  </form>
+</section>
+
+<!-- ── 你将获得 ───────────────────────────────────────────── -->
+<section class="card gets">
+  <h2 class="card-title">一份报告，看清你的财路</h2>
+  <ol class="gets-list">
+    <li><b>财富指数与品阶</b><span>在 4000 张命盘的实测分布里，你排在哪个位次</span></li>
+    <li><b>财富五力</b><span>正财、偏财、守财、创富、贵人，每一项都写明盘上依据</span></li>
+    <li><b>一生财运曲线</b><span>逐步大运推演，标出你的财富高峰十年</span></li>
+    <li><b>近三年财运</b><span>流年十神与紫微流年四化合看，哪年宜攻、哪年宜守</span></li>
+    <li><b>财从何来</b><span>八字财星与紫微财帛宫，说清你最顺的赚钱方式</span></li>
+    <li><b>招财指南</b><span>喜用五行对应的方位、颜色、数字、行业与贵人生肖</span></li>
+  </ol>
+</section>
+
+<section class="card trust">
+  <h2 class="card-title">为什么算得准</h2>
+  <div class="trust-grid">
+    <div><b>秒级</b><span>节气时刻天文算法实时推算，误差 ±30 秒</span></div>
+    <div><b>真太阳时</b><span>按出生地经度校正，不让时辰错位</span></div>
+    <div><b>双盘</b><span>八字看格局、紫微看宫位，两套体系互相印证</span></div>
+  </div>
+</section>
+
+</div>
+
+<!-- ── 结果 ─────────────────────────────────────────────── -->
+<section id="result" hidden>
+
+  <!-- 财富金卡：整页最值得截图的一块 -->
+  <div class="vip-card" id="vip-card">
+    <div class="vc-sheen"></div>
+    <div class="vc-top">
+      <span class="vc-brand">子牙财鉴 · 财富金卡</span>
+      <span class="vc-tier" id="vc-tier">三品</span>
+    </div>
+    <div class="vc-owner" id="vc-owner">阁下的财富命格</div>
+
+    <div class="vc-main">
+      <div class="gauge">
+        <svg viewBox="0 0 120 120" aria-hidden="true">
+          <defs>
+            <linearGradient id="gGauge" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0%" stop-color="#FFF1C2"/>
+              <stop offset="55%" stop-color="#D9B061"/>
+              <stop offset="100%" stop-color="#9C7A35"/>
+            </linearGradient>
+          </defs>
+          <circle class="g-track" cx="60" cy="60" r="50"/>
+          <circle class="g-fill" id="g-fill" cx="60" cy="60" r="50"/>
+        </svg>
+        <div class="g-num">
+          <b id="vc-index">0</b>
+          <span>财富指数</span>
+        </div>
+      </div>
+      <div class="vc-side">
+        <div class="vc-rank"><span id="vc-rank-name">丰盈</span><em>之格</em></div>
+        <div class="vc-beat">胜过 <b id="vc-beat">0</b>% 的命盘</div>
+        <div class="vc-type" id="vc-type">—</div>
+      </div>
+    </div>
+
+    <div class="vc-tags" id="vc-tags"></div>
+    <div class="vc-foot">
+      <span class="vc-chip" aria-hidden="true"></span>
+      <span class="vc-no" id="vc-no">NO. ———— · —— · ——</span>
+      <span class="vc-seal" aria-hidden="true">財</span>
+    </div>
+  </div>
+  <p class="shot-hint">截图保存你的财富金卡，分享给朋友一起测</p>
+
+  <div class="birth-meta" id="birth-meta"></div>
+  <p class="boundary" id="boundary" hidden></p>
+
+  <section class="card">
+    <h2 class="card-title">总 评</h2>
+    <p class="tier-desc" id="tier-desc"></p>
+    <p class="summary" id="summary"></p>
+  </section>
+
+  <section class="card">
+    <h2 class="card-title">财富五力</h2>
+    <p class="card-lede">五种来钱与留钱的能力，点开看盘上依据</p>
+    <div class="forces" id="forces"></div>
+  </section>
+
+  <section class="card">
+    <h2 class="card-title">一生财运曲线</h2>
+    <p class="card-lede">按八字大运逐十年推演，合参同期紫微大限四化。数值为本盘内的相对起伏。</p>
+    <div class="curve-box">
+      <svg class="curve" id="curve" viewBox="0 0 340 190" role="img"
+           aria-label="一生财运曲线"></svg>
+      <div class="curve-tip" id="curve-tip" hidden></div>
+    </div>
+    <details class="curve-table">
+      <summary>逐步大运明细</summary>
+      <div id="curve-rows"></div>
+    </details>
+  </section>
+
+  <section class="card">
+    <h2 class="card-title">近三年财运</h2>
+    <div class="years" id="years"></div>
+  </section>
+
+  <section class="card">
+    <h2 class="card-title">财从何来</h2>
+    <div class="source">
+      <div class="src-block">
+        <h3><i>八字</i>财星</h3>
+        <div class="src-tags" id="bz-tags"></div>
+        <ul class="src-list" id="bz-lines"></ul>
+      </div>
+      <div class="src-block">
+        <h3><i>紫微</i>财帛宫</h3>
+        <div class="src-tags" id="zw-tags"></div>
+        <div id="zw-stars"></div>
+        <ul class="src-list" id="zw-lines"></ul>
+      </div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2 class="card-title">双盘合参</h2>
+    <p class="card-lede">两套体系各自给出的「财富」分。八字看五行生克，紫微看宫位星曜，侧重本就不同。</p>
+    <div class="dual" id="dual"></div>
+    <button type="button" class="link-ask" id="why-ask">两套分数不一样，该信哪个？发给命理师对一下 →</button>
+  </section>
+
+  <section class="card">
+    <h2 class="card-title">招财指南</h2>
+    <div class="guide" id="guide"></div>
+    <p class="card-note" id="guide-note"></p>
+  </section>
+
+  <!-- ── 尊享精批 ────────────────────────────────────────── -->
+  <section class="card premium" id="premium">
+    <span class="corner tl"></span><span class="corner tr"></span>
+    <span class="corner bl"></span><span class="corner br"></span>
+    <div class="pm-badge">尊 享</div>
+    <h2 class="card-title">一对一 · 财富精批</h2>
+    <p class="card-lede">以上是命盘的骨架。真正决定你怎么赚、何时出手、守在哪里的细节，需要有人逐字为你读盘。</p>
+
+    <ul class="locked">
+      <li><b>十年财运逐年细批</b><span class="blur-lines"><i></i><i></i></span></li>
+      <li><b>最适合你的赚钱路径与行业定位</b><span class="blur-lines"><i></i><i></i></span></li>
+      <li><b>投资风格与风险边界</b><span class="blur-lines"><i></i><i></i></span></li>
+      <li><b>婚姻、合伙对你财运的影响</b><span class="blur-lines"><i></i><i></i></span></li>
+      <li><b>明年逐月财运节奏</b><span class="blur-lines"><i></i><i></i></span></li>
+      <li><b>守财与开运的具体做法</b><span class="blur-lines"><i></i><i></i></span></li>
+    </ul>
+
+    <div class="pm-price" id="pm-price" hidden></div>
+    <button type="button" class="btn-gold btn-xl btn-block" id="unlock">
+      <span>添加微信 · 解锁完整精批</span>
+    </button>
+
+    <p class="q-hint">或点一个你最想问的，命盘和问题会一起复制好：</p>
+    <div class="suggestions" id="suggestions">
+      <button class="chip">我的财运高峰期具体该怎么用？</button>
+      <button class="chip">我适合做什么行业赚钱？</button>
+      <button class="chip">明年适合投资还是守成？</button>
+      <button class="chip">我适合创业还是打工？</button>
+      <button class="chip">我最弱的那一力怎么补？</button>
+    </div>
+
+    <div class="wechat-card">
+      <img class="qr" id="wx-qr" alt="微信二维码" hidden>
+      <div class="wx-id-row">
+        <span class="wx-label">微信号</span>
+        <code id="wx-id">…</code>
+        <button type="button" class="btn-copy" id="copy-wx">复制</button>
+      </div>
+      <p class="wx-hint" id="wx-hint"></p>
+      <p class="wx-offer" id="wx-offer"></p>
+    </div>
+  </section>
+
+  <button type="button" class="btn-ghost btn-block" id="redo">为家人朋友再测一次</button>
+</section>
+
+<footer>
+  <p>命理是一套传统的解释框架，讲的是倾向与节奏，不是既定的结局。<br>
+     本站内容仅供参考，不构成任何投资、理财或法律建议。</p>
+</footer>
+
+</main>
+
+<!-- 推演中：仪式感的停顿。排盘本身几毫秒就完，秒出结果像查表 -->
+<div class="casting" id="casting" hidden>
+  <div class="cast-coin"><span>財</span></div>
+  <p class="cast-step" id="cast-step">排定八字四柱…</p>
+  <div class="cast-bar"><i id="cast-bar"></i></div>
+</div>
+
+<!-- 覆盖层必须是 body 的直接子元素：祖先被隐藏时自身 hidden=false 也没用 -->
+<div class="sheet" id="place-sheet" hidden role="dialog" aria-modal="true" aria-label="选择出生地">
+  <div class="sheet-mask" data-close></div>
+  <div class="sheet-body">
+    <div class="sheet-head">
+      <b>选择出生地</b>
+      <button type="button" class="sheet-x" data-close aria-label="关闭">✕</button>
+    </div>
+    <div class="sheet-search">
+      <input type="search" id="place-search" autocomplete="off"
+             placeholder="搜城市或省份，如 苏州、江苏">
+    </div>
+    <div class="sheet-list" id="place-list"></div>
+    <p class="sheet-foot">经度只影响真太阳时校正。找不到你的城市，选同省最近的一个即可。</p>
+  </div>
+</div>
+
+<div class="toast" id="toast" hidden></div>
+
+<script src="/shared/common.js?v=__V__"></script>
+<script src="/shared/places.js?v=__V__"></script>
+<script src="/static/caifu.js?v=__V__"></script>
+</body>
+</html>

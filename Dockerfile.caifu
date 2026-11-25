@@ -1,0 +1,27 @@
+# 财富站（子牙财鉴）的镜像。与主站是两个独立服务、两个网址。
+#
+# 构建上下文必须是仓库根目录（要用到共享的排盘内核 bazi/、ziwei/）：
+#
+#   docker build -f Dockerfile.caifu -t caifu .
+#
+# 腾讯云 CloudBase 云托管：新建一个服务（不要和主站共用服务），
+# 「Dockerfile 名称」填 Dockerfile.caifu，目标目录留空（即仓库根），端口 80。
+
+FROM python:3.12-slim
+
+WORKDIR /app
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# 只拷财富站用得到的东西：排盘内核 + 财富站本身 + 两份共用前端脚本。
+# 主站的页面、二维码、AI 与支付模块都不进这个镜像。
+COPY bazi/  bazi/
+COPY ziwei/ ziwei/
+COPY caifu/ caifu/
+COPY static/common.js static/places.js static/
+
+ENV PORT=80
+EXPOSE 80
+
+CMD ["sh", "-c", "uvicorn caifu.app:app --host 0.0.0.0 --port ${PORT}"]
