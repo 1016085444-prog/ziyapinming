@@ -600,6 +600,13 @@ input[type=time]::-webkit-calendar-picker-indicator { filter: invert(.8) sepia(1
 .blur-lines i { display: block; height: 7px; margin: 5px 0; border-radius: 4px; background: linear-gradient(90deg, rgba(214, 178, 106, .45), rgba(214, 178, 106, .15)); }
 .blur-lines i + i { width: 62%; }
 .pm-price { margin: 0 0 12px; text-align: center; font: 700 26px var(--serif); color: var(--gold-hi); }
+.shop { margin: 0 0 16px; text-align: center; }
+.shop-note { margin: 0 0 8px; font-size: 13px; color: var(--muted); }
+.shop-name {
+  padding: 6px 16px; border-radius: 999px; cursor: pointer;
+  font: 700 15px/1.4 "Courier New", monospace; letter-spacing: .06em;
+  color: var(--gold-hi); background: rgba(214, 178, 106, .08); border: 1px dashed var(--line-strong);
+}
 .pm-price small { font-size: 13px; color: var(--muted); margin-left: 6px; font-weight: 400; }
 
 .q-hint { margin: 22px 0 10px; text-align: center; font-size: 12.5px; color: var(--muted); }

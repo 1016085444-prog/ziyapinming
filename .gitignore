@@ -14,3 +14,6 @@ __pycache__/
 # 二维码属于你的私人素材，按需决定要不要入库。
 # 若想让部署平台自动带上它，把下面这行注释掉。
 # static/wechat-qr.png
+
+# 打包产物（tools/pack_caifu.py）
+dist/

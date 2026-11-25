@@ -36,7 +36,15 @@ WECHAT_OFFER = os.environ.get(
 # 精批的价格展示。留空则页面不显示价格，只显示「添加微信咨询」。
 # 填写示例："¥99"。注意：只写真实售价，不要写虚构的「原价」做划线对比——
 # 那属于虚构原价，违反《价格法》与《明码标价和禁止价格欺诈规定》。
-PREMIUM_PRICE = os.environ.get("CAIFU_PREMIUM_PRICE", "")
+PREMIUM_PRICE = os.environ.get("CAIFU_PREMIUM_PRICE", "¥9.9")
+
+# 购买渠道说明。各平台的店铺同名时，告诉用户搜这个名字即可。
+# 留空则不显示这一行。
+SHOP_NAME = os.environ.get("CAIFU_SHOP_NAME", "ziyapinming")
+SHOP_NOTE = os.environ.get(
+    "CAIFU_SHOP_NOTE",
+    "各大平台搜索同名店铺「{}」即可下单".format(SHOP_NAME) if SHOP_NAME else "",
+)
 
 # 二维码图片：放在 caifu/static/ 下，存在才显示
 WECHAT_QR_FILE = "wechat-qr.png"
@@ -56,4 +64,6 @@ def public_config():
         "wechat_offer": WECHAT_OFFER,
         "wechat_qr": wechat_qr_url(),
         "premium_price": PREMIUM_PRICE,
+        "shop_name": SHOP_NAME,
+        "shop_note": SHOP_NOTE,
     }

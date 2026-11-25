@@ -455,7 +455,21 @@ async function loadPrice() {
       p.append(el('small', null, '/ 份 · 真人一对一'));
       p.hidden = false;
     }
-  } catch (_) { /* 价格不是必需项，拿不到就不显示 */ }
+    if (cfg.shop_note) {
+      $('#shop-note').textContent = cfg.shop_note;
+      const btn = $('#shop-name');
+      if (cfg.shop_name) {
+        btn.textContent = cfg.shop_name + '　复制';
+        btn.addEventListener('click', async () => {
+          const ok = await copyText(cfg.shop_name);
+          showToast(ok ? '店铺名已复制，去平台里搜索即可' : '请手动搜索：' + cfg.shop_name);
+        });
+      } else {
+        btn.hidden = true;
+      }
+      $('#shop').hidden = false;
+    }
+  } catch (_) { /* 价格与店铺不是必需项，拿不到就不显示 */ }
 }
 
 document.addEventListener('DOMContentLoaded', () => {

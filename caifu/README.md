@@ -28,7 +28,8 @@ python3 -m unittest discover -s tests -v
 |---|---|
 | `CAIFU_WECHAT_ID` | 微信号。默认与主站同一个，要分开接待就填另一个 |
 | `CAIFU_WECHAT_OFFER` | 加微信能得到什么，要具体 |
-| `CAIFU_PREMIUM_PRICE` | 精批价格，如 `¥99`。留空则不显示价格 |
+| `CAIFU_PREMIUM_PRICE` | 精批价格，当前 `¥9.9`。留空则不显示价格 |
+| `CAIFU_SHOP_NAME` | 各平台同名店铺名，当前 `ziyapinming`，页面上可一键复制。留空则不显示 |
 | `caifu/static/wechat-qr.png` | 二维码图片，放了才显示 |
 
 价格只写真实售价。**不要做「原价 ¥399 → 现价 ¥99」这种划线价**，除非那个
