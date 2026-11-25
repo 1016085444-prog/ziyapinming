@@ -17,3 +17,6 @@ __pycache__/
 
 # 打包产物（tools/pack_caifu.py）
 dist/
+
+# 财富站本地开发用的 SQLite 绑定表
+data/

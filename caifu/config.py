@@ -47,6 +47,27 @@ SHOP_NOTE = os.environ.get(
     "朋友也想测？各大平台搜索同名店铺「{}」".format(SHOP_NAME) if SHOP_NAME else "",
 )
 
+# ── 兑换码（必配）────────────────────────────────────────────
+#
+# 网站本身是付费商品：一个兑换码绑定一个生日。下面三项都只走环境变量，
+# **不要写进代码**——仓库一旦公开，拿到密钥的人就能自己造码。
+#
+#   CAIFU_CODE_SECRET  签发兑换码的密钥。随便一长串随机字符，设定后不要再改，
+#                      改了之前卖出去的码全部作废。
+#   CAIFU_ADMIN_KEY    管理页（/admin）的登录口令，用来生成码、查码、重置码。
+#                      和上面那个分开，泄露了换掉也不影响已售的码。
+#   CAIFU_MYSQL_URL    绑定记录存哪。形如 mysql://用户:密码@主机:3306/库名 。
+#                      云托管容器会重启、会缩到零，本地文件存不住，线上必须配。
+#                      不配则存本地 SQLite（CAIFU_DB_PATH），只适合本机开发。
+#
+# 本机开发不想每次输码：设 CAIFU_OPEN_ACCESS=1 关掉兑换码校验。线上绝不要设。
+
+CODE_SECRET = os.environ.get("CAIFU_CODE_SECRET", "")
+ADMIN_KEY = os.environ.get("CAIFU_ADMIN_KEY", "")
+MYSQL_URL = os.environ.get("CAIFU_MYSQL_URL", "")
+DB_PATH = os.environ.get("CAIFU_DB_PATH", str(PACKAGE_DIR.parent / "data" / "caifu.db"))
+OPEN_ACCESS = os.environ.get("CAIFU_OPEN_ACCESS", "") == "1"
+
 # 二维码图片：放在 caifu/static/ 下，存在才显示
 WECHAT_QR_FILE = "wechat-qr.png"
 
@@ -67,4 +88,5 @@ def public_config():
         "premium_price": PREMIUM_PRICE,
         "shop_name": SHOP_NAME,
         "shop_note": SHOP_NOTE,
+        "need_code": not OPEN_ACCESS,
     }

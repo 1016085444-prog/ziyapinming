@@ -127,6 +127,12 @@
   <p class="card-lede">按出生证明上的时间填写。时辰越准，财运推演越准。</p>
 
   <form id="birth-form" autocomplete="off">
+    <label class="field code-field" id="code-field">
+      <span>兑换码 <em>购买后店铺发给你 · 一个码绑定一个生日</em></span>
+      <input type="text" id="code" maxlength="20" placeholder="如 ABCD-EFGH-JKLM"
+             autocapitalize="characters" autocorrect="off" spellcheck="false">
+    </label>
+
     <label class="field">
       <span>称呼 <em>选填 · 仅显示在你的财富金卡上，不上传</em></span>
       <input type="text" id="nick" maxlength="8" placeholder="如：林先生">
@@ -183,7 +189,7 @@
 
     <button type="submit" class="btn-gold btn-xl btn-block"><span>开 启 财 富 命 盘</span></button>
     <p class="form-error" id="form-error" hidden></p>
-    <p class="privacy">🔒 生辰只用于本次计算，服务器不保存任何记录</p>
+    <p class="privacy">🔒 服务器不保存你的生辰；兑换码只记录所绑日期的加密摘要，无法还原</p>
   </form>
 </section>
 
@@ -369,7 +375,8 @@
     </div>
   </section>
 
-  <button type="button" class="btn-ghost btn-block" id="redo">为家人朋友再测一次</button>
+  <button type="button" class="btn-ghost btn-block" id="redo">修改出生时间或地点，重新测</button>
+  <p class="redo-note" id="redo-note">一个兑换码只能测一个生日。为家人朋友测算，请在各平台搜索「ziyapinming」另购</p>
 </section>
 
 <footer>

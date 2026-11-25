@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<meta name="theme-color" content="#0A0806">
+<title>子牙财鉴 · 店主管理</title>
+<link rel="stylesheet" href="/static/caifu.css?v=__V__">
+</head>
+<body class="admin">
+
+<div class="aura" aria-hidden="true"></div>
+
+<header class="top">
+  <div class="logo">
+    <span class="seal" aria-hidden="true">財</span>
+    <span class="logo-text"><b>店主管理</b><i>ADMIN</i></span>
+  </div>
+</header>
+
+<main>
+
+<!-- 登录 -->
+<section class="card" id="login-card">
+  <h2 class="card-title">登 录</h2>
+  <p class="card-lede">输入部署时设置的管理口令（环境变量 CAIFU_ADMIN_KEY）</p>
+  <form id="login-form" autocomplete="off">
+    <label class="field">
+      <span>管理口令</span>
+      <input type="password" id="admin-key" required>
+    </label>
+    <button type="submit" class="btn-gold btn-block"><span>进 入</span></button>
+    <p class="form-error" id="login-error" hidden></p>
+  </form>
+</section>
+
+<div id="panel" hidden>
+
+  <!-- 生成 -->
+  <section class="card">
+    <h2 class="card-title">生成兑换码</h2>
+    <p class="card-lede">每卖出一单发一个码。码与第一次测算的生日绑定，之后只能测这个生日。</p>
+    <div class="field-row admin-gen">
+      <label class="field">
+        <span>数量</span>
+        <select id="gen-count">
+          <option value="1">1 个</option>
+          <option value="5">5 个</option>
+          <option value="10">10 个</option>
+          <option value="20">20 个</option>
+          <option value="50">50 个</option>
+        </select>
+      </label>
+      <div class="field">
+        <button type="button" class="btn-gold btn-block" id="gen-btn"><span>生 成</span></button>
+      </div>
+    </div>
+    <div class="code-list" id="code-list"></div>
+    <button type="button" class="btn-ghost btn-block" id="copy-all" hidden>全部复制（每行一个链接）</button>
+  </section>
+
+  <!-- 查询 / 重置 -->
+  <section class="card">
+    <h2 class="card-title">查询与重置</h2>
+    <p class="card-lede">买家说日期填错了？查一下这个码，确认后重置，他就能重新绑定正确的生日。</p>
+    <label class="field code-field">
+      <span>兑换码</span>
+      <input type="text" id="q-code" maxlength="20" placeholder="粘贴买家的兑换码"
+             autocapitalize="characters" autocorrect="off" spellcheck="false">
+    </label>
+    <button type="button" class="btn-gold btn-block" id="q-btn"><span>查 询</span></button>
+    <div class="q-result" id="q-result" hidden></div>
+    <button type="button" class="btn-ghost btn-block" id="reset-btn" hidden>重置这个码（解除生日绑定）</button>
+  </section>
+
+  <p class="admin-foot" id="admin-foot"></p>
+  <button type="button" class="link-ask" id="logout">退出登录</button>
+</div>
+
+</main>
+
+<div class="toast" id="toast" hidden></div>
+
+<script src="/shared/common.js?v=__V__"></script>
+<script src="/static/admin.js?v=__V__"></script>
+</body>
+</html>

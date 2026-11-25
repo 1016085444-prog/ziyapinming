@@ -6,7 +6,13 @@
 
 'use strict';
 
-const state = { wechatId: '', summary: '', nick: '' };
+const state = { wechatId: '', summary: '', nick: '', needCode: true };
+
+// 兑换码记在本机，买家下次打开（或改时辰重测）不用再输一遍。
+// 只存码，不存生日——生日每次都由用户自己填。
+const CODE_KEY = 'caifu_code';
+const saveCode = (c) => { try { localStorage.setItem(CODE_KEY, c); } catch (_) {} };
+const loadCode = () => { try { return localStorage.getItem(CODE_KEY) || ''; } catch (_) { return ''; } };
 
 // 推演停顿。算盘本身几毫秒就完，秒出结果像查表，反而折损可信度。
 const CAST_STEPS = ['排定八字四柱…', '真太阳时校正…', '安紫微十二宫…',
@@ -40,9 +46,12 @@ function readForm(dateInput) {
   if (!date) return { error: '请填写四位数的出生年份（1900–2100）' };
   const t = (f.time.value || '').split(':');
   if (t.length < 2) return { error: '请填写出生时刻' };
+  const code = ($('#code').value || '').trim();
+  if (state.needCode && !code) return { error: '请输入兑换码（购买后店铺发给你）', focus: '#code' };
   const place = ZiyaPlaces.selected();
   return {
     payload: {
+      code: code,
       year: date.year, month: date.month, day: date.day,
       hour: Number(t[0]), minute: Number(t[1]),
       gender: f.querySelector('input[name=gender]:checked').value,
@@ -72,20 +81,21 @@ async function cast(payload) {
   requestAnimationFrame(() => { bar.style.width = (100 / CAST_STEPS.length) + '%'; });
 
   try {
-    const [res] = await Promise.all([
-      fetch('/api/wealth', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      }),
-      wait(CAST_MS),
-    ]);
+    const pause = wait(CAST_MS);
+    const res = await fetch('/api/wealth', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    // 出错立刻收起动画：兑换码填错还要陪着转 2.6 秒，只会更烦
     if (!res.ok) {
       let msg = '测算失败，请检查输入';
       try { const j = await res.json(); if (typeof j.detail === 'string') msg = j.detail; } catch (_) {}
       throw new Error(msg);
     }
-    return await res.json();
+    const data = await res.json();
+    await pause;
+    return data;
   } finally {
     clearInterval(timer);
     box.hidden = true;
@@ -469,6 +479,10 @@ async function loadPrice() {
       }
       $('#shop').hidden = false;
     }
+    if (cfg.need_code === false) {
+      state.needCode = false;
+      $('#code-field').hidden = true;
+    }
     if (cfg.shop_name) {
       const v = $('#vc-shop');
       v.textContent = '测你的财富指数 · 各平台搜「' + cfg.shop_name + '」';
@@ -486,6 +500,11 @@ document.addEventListener('DOMContentLoaded', () => {
   const ask = initWechat(state);
   loadPrice();
 
+  // 兑换码：专属链接 ?code= 优先，其次本机记住的
+  const urlCode = new URLSearchParams(location.search).get('code');
+  if (urlCode) saveCode(urlCode.trim());
+  $('#code').value = (urlCode || loadCode()).trim();
+
   $('#go-form').addEventListener('click', () => scrollToEl($('#intake'), 12));
 
   $('#unlock').addEventListener('click', () => ask('我想要一份完整的财富精批'));
@@ -498,11 +517,13 @@ document.addEventListener('DOMContentLoaded', () => {
     if (form.error) {
       err.textContent = form.error;
       err.hidden = false;
+      if (form.focus) $(form.focus).focus();
       return;
     }
     state.nick = ($('#nick').value || '').trim().slice(0, 8);
     try {
       const data = await cast(form.payload);
+      if (form.payload.code) saveCode(form.payload.code);
       showResult(data, form.payload, form.place);
     } catch (ex) {
       err.textContent = ex.message || '网络异常，请稍后再试';
@@ -513,7 +534,6 @@ document.addEventListener('DOMContentLoaded', () => {
   $('#redo').addEventListener('click', () => {
     $('#result').hidden = true;
     $('#landing').hidden = false;
-    $('#nick').value = '';
     scrollToEl($('#intake'), 12);
   });
 });
